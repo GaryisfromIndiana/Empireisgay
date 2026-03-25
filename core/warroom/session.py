@@ -495,21 +495,44 @@ Respond as JSON:
             from db.engine import session_scope
             from db.models import WarRoom
 
+            # Ensure all data is JSON-serializable (no datetime objects, no custom classes)
+            def to_serializable(obj):
+                if isinstance(obj, dict):
+                    return {str(k): to_serializable(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [to_serializable(v) for v in obj]
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                if hasattr(obj, "__dict__") and not isinstance(obj, type):
+                    return to_serializable(obj.__dict__)
+                try:
+                    import json
+                    json.dumps(obj)
+                    return obj
+                except (TypeError, ValueError):
+                    return str(obj)
+
+            synthesis = to_serializable(self.synthesis) if self.synthesis else {}
+            action_items = to_serializable(self.action_items) if self.action_items else []
+            transcript = to_serializable(self.transcript[-30:]) if self.transcript else []
+
             with session_scope() as session:
                 war_room = WarRoom(
-                    id=self.session_id or None,
                     directive_id=self.directive_id or None,
                     empire_id=self.empire_id,
                     status="closed",
                     session_type=self.session_type,
                     participants_json=[p["id"] for p in self.participants],
                     debate_rounds_json=[],
-                    synthesis_json=self.synthesis,
-                    action_items_json=[ai.__dict__ for ai in self.action_items],
-                    transcript_json=[m.__dict__ for m in self.transcript[-50:]],  # Last 50 messages
+                    synthesis_json=synthesis,
+                    action_items_json=action_items,
+                    transcript_json=transcript,
                     total_cost_usd=self._total_cost,
                     completed_at=datetime.now(timezone.utc),
                 )
                 session.add(war_room)
+
+            logger.info("War Room persisted (%d participants, $%.4f)", len(self.participants), self._total_cost)
+
         except Exception as e:
-            logger.warning("Failed to persist war room session: %s", e)
+            logger.error("Failed to persist war room: %s", e)

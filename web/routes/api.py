@@ -112,11 +112,26 @@ def api_create_directive():
 
 @api_bp.route("/directives/<directive_id>/execute", methods=["POST"])
 def api_execute_directive(directive_id: str):
-    """Execute a directive."""
+    """Execute a directive in a background thread.
+
+    Returns immediately with status. Poll /directives/<id>/progress for updates.
+    """
     empire_id = current_app.config.get("EMPIRE_ID", "")
-    from core.directives.manager import DirectiveManager
-    dm = DirectiveManager(empire_id)
-    return jsonify(dm.execute_directive(directive_id))
+    import threading
+
+    def run_directive():
+        from core.directives.manager import DirectiveManager
+        dm = DirectiveManager(empire_id)
+        try:
+            dm.execute_directive(directive_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("Directive execution failed: %s", e)
+
+    thread = threading.Thread(target=run_directive, daemon=True, name=f"directive-{directive_id[:8]}")
+    thread.start()
+
+    return jsonify({"directive_id": directive_id, "status": "started", "message": "Executing in background. Poll /api/directives/{id}/progress for updates."}), 202
 
 
 @api_bp.route("/directives/<directive_id>/progress")
