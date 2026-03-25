@@ -108,8 +108,10 @@ class KnowledgeGraph:
         confidence: float = 0.8,
         source_task_id: str = "",
         tags: list[str] | None = None,
+        valid_from: str | None = None,
+        valid_to: str | None = None,
     ) -> dict:
-        """Add an entity to the knowledge graph.
+        """Add an entity to the knowledge graph with optional temporal bounds.
 
         Args:
             name: Entity name.
@@ -119,18 +121,39 @@ class KnowledgeGraph:
             confidence: Confidence score.
             source_task_id: Source task.
             tags: Tags for search.
+            valid_from: When this entity became relevant (ISO datetime).
+            valid_to: When this entity stopped being relevant.
 
         Returns:
             Created entity as dict.
         """
+        from datetime import datetime, timezone
+
         repo = self._get_repo()
+
+        # Enrich attributes with temporal data
+        enriched_attrs = dict(attributes or {})
+        if valid_from:
+            enriched_attrs["valid_from"] = valid_from
+        if valid_to:
+            enriched_attrs["valid_to"] = valid_to
+        enriched_attrs["last_seen"] = datetime.now(timezone.utc).isoformat()
 
         # Check for existing entity with same name
         existing = repo.get_by_name(name, self.empire_id)
         if existing:
-            # Update existing entity
+            # Update existing entity — merge attributes, bump confidence
+            merged_attrs = dict(existing.attributes_json or {})
+            merged_attrs.update(enriched_attrs)
+            merged_attrs["update_count"] = merged_attrs.get("update_count", 0) + 1
+
+            update_fields = {"attributes_json": merged_attrs, "updated_at": datetime.now(timezone.utc)}
             if confidence > existing.confidence:
-                repo.update(existing.id, confidence=confidence, description=description)
+                update_fields["confidence"] = confidence
+            if description and len(description) > len(existing.description or ""):
+                update_fields["description"] = description
+
+            repo.update(existing.id, **update_fields)
             repo.commit()
             return {"id": existing.id, "name": name, "action": "updated"}
 
@@ -139,7 +162,7 @@ class KnowledgeGraph:
             entity_type=entity_type,
             name=name,
             description=description,
-            attributes_json=attributes or {},
+            attributes_json=enriched_attrs,
             confidence=confidence,
             source_task_id=source_task_id or None,
             tags_json=tags or [],

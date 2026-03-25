@@ -524,6 +524,81 @@ class BiTemporalMemory:
                     }
         return None
 
+    def store_smart(
+        self,
+        content: str,
+        title: str = "",
+        category: str = "general",
+        valid_from: str | None = None,
+        source: str = "",
+        source_url: str = "",
+        tags: list[str] | None = None,
+        lieutenant_id: str = "",
+        importance: float = 0.6,
+        confidence: float = 0.8,
+    ) -> TemporalFact:
+        """Intelligently store a fact with auto-supersession detection.
+
+        1. Checks if this updates/supersedes an existing fact (by title or content similarity)
+        2. Checks for contradictions with existing knowledge
+        3. Stores with proper temporal metadata
+
+        This is the recommended way for scrapers and research pipelines
+        to store new information.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Check for contradictions — log but don't block
+        contradictions = self.find_contradictions(content)
+        if contradictions:
+            logger.info(
+                "New fact may contradict %d existing facts: %s",
+                len(contradictions),
+                [c.title for c in contradictions[:3]],
+            )
+            # Boost importance — contradictory info is noteworthy
+            importance = min(1.0, importance + 0.1)
+            tags = (tags or []) + ["has_contradictions"]
+
+        # Auto-detect if this should supersede an existing fact
+        # by checking for high word overlap with existing same-category facts
+        auto_supersede_id = None
+        try:
+            current = self.get_current_facts(query=content[:200], category=category, limit=5)
+            content_words = set(content.lower().split()[:60])
+
+            for fact in current:
+                fact_words = set(fact.content.lower().split()[:60])
+                overlap = len(content_words & fact_words)
+                union = len(content_words | fact_words)
+                similarity = overlap / union if union > 0 else 0
+
+                if similarity > 0.4 and fact.title:
+                    # High overlap — this likely updates the existing fact
+                    auto_supersede_id = fact.id
+                    title = title or fact.title  # Keep the existing title for version chain
+                    logger.info("Auto-superseding fact: %s (similarity=%.2f)", fact.title, similarity)
+                    break
+        except Exception:
+            pass
+
+        # If we found something to supersede, mark it
+        if auto_supersede_id:
+            self._mark_superseded(auto_supersede_id, now)
+
+        return self.store_fact(
+            content=content,
+            title=title,
+            category=category,
+            valid_from=valid_from,
+            importance=importance,
+            confidence=confidence,
+            source=source,
+            source_url=source_url,
+            tags=tags,
+            lieutenant_id=lieutenant_id,
+        )
+
     def _mark_superseded(self, fact_id: str, superseded_at: str) -> None:
         """Mark a fact as superseded."""
         try:

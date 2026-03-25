@@ -109,6 +109,15 @@ class MemoryManager:
         from db.models import MemoryEntry as MemoryModel
         from db.models import _generate_id
 
+        now = datetime.now(timezone.utc).isoformat()
+
+        # All memories are temporal by default — attach transaction time
+        enriched_metadata = dict(metadata or {})
+        if "recorded_at" not in enriched_metadata:
+            enriched_metadata["recorded_at"] = now
+        if "temporal" not in enriched_metadata:
+            enriched_metadata["temporal"] = True
+
         entry_id = _generate_id()
         with session_scope() as session:
             entry = MemoryModel(
@@ -124,7 +133,7 @@ class MemoryManager:
                 effective_importance=importance,
                 decay_factor=1.0,
                 tags_json=tags or [],
-                metadata_json=metadata or {},
+                metadata_json=enriched_metadata,
                 source_task_id=source_task_id or None,
                 source_type=source_type,
                 expires_at=expires_at,
@@ -274,18 +283,69 @@ class MemoryManager:
         return promoted
 
     def decay(self, rate: float = 0.01) -> int:
-        """Apply time-based decay to all memories.
+        """Apply temporally-aware decay to all memories.
+
+        Decay rates vary by age and type:
+        - Episodic memories decay 2x faster
+        - Semantic memories decay 0.5x slower
+        - Facts older than 30 days decay 1.5x faster
+        - Superseded facts decay 3x faster
 
         Args:
-            rate: Decay rate per application.
+            rate: Base decay rate per application.
 
         Returns:
             Number of memories decayed.
         """
-        repo = self._get_repo()
-        count = repo.apply_decay(empire_id=self.empire_id, rate=rate)
-        repo.commit()
-        logger.info("Applied decay to %d memories (rate=%.3f)", count, rate)
+        from db.engine import session_scope
+        from db.models import MemoryEntry
+        from sqlalchemy import select
+
+        count = 0
+        now = datetime.now(timezone.utc)
+
+        try:
+            with session_scope() as session:
+                stmt = (
+                    select(MemoryEntry)
+                    .where(MemoryEntry.empire_id == self.empire_id)
+                    .where(MemoryEntry.decay_factor > 0.0)
+                )
+                entries = list(session.execute(stmt).scalars().all())
+
+                for entry in entries:
+                    actual_rate = rate
+
+                    # Type-based decay multiplier
+                    if entry.memory_type == "episodic":
+                        actual_rate *= 2.0
+                    elif entry.memory_type == "semantic":
+                        actual_rate *= 0.5
+                    elif entry.memory_type == "design":
+                        actual_rate *= 0.3  # Design patterns are durable
+
+                    # Age-based decay multiplier
+                    if entry.created_at:
+                        age_days = (now - entry.created_at).total_seconds() / 86400
+                        if age_days > 90:
+                            actual_rate *= 2.0
+                        elif age_days > 30:
+                            actual_rate *= 1.5
+
+                    # Superseded facts decay much faster
+                    meta = entry.metadata_json or {}
+                    if isinstance(meta, dict) and meta.get("superseded_at"):
+                        actual_rate *= 3.0
+
+                    # Apply decay
+                    entry.decay_factor = max(0.0, entry.decay_factor - actual_rate)
+                    entry.effective_importance = entry.importance_score * entry.decay_factor
+                    count += 1
+
+        except Exception as e:
+            logger.warning("Temporal decay failed: %s", e)
+
+        logger.info("Applied temporal decay to %d memories (base rate=%.3f)", count, rate)
         return count
 
     def cleanup(self, importance_threshold: float = 0.05) -> dict:
@@ -505,10 +565,10 @@ class MemoryManager:
         token_budget: int = 4000,
         include_types: list[str] | None = None,
     ) -> str:
-        """Build a context string from memories that fits within a token budget.
+        """Build a temporally-aware context string within a token budget.
 
-        Selects the most relevant and important memories, formats them
-        for LLM prompt injection, and ensures they fit within the budget.
+        Filters out superseded facts, weights by recency + importance,
+        and formats for LLM prompt injection.
 
         Args:
             query: Optional query for relevance filtering.
@@ -521,36 +581,74 @@ class MemoryManager:
         """
         chars_per_token = 4
         char_budget = token_budget * chars_per_token
+        now = datetime.now(timezone.utc).isoformat()
 
         types = include_types or ["semantic", "experiential", "design", "episodic"]
 
-        # Get memories — prioritize by query relevance, then importance
+        # Get memories
         all_memories = []
         for mtype in types:
             if query:
-                memories = self.recall(query=query, memory_types=[mtype], lieutenant_id=lieutenant_id, limit=10)
+                memories = self.recall(query=query, memory_types=[mtype], lieutenant_id=lieutenant_id, limit=15)
             else:
-                memories = self.recall(memory_types=[mtype], lieutenant_id=lieutenant_id, limit=10)
+                memories = self.recall(memory_types=[mtype], lieutenant_id=lieutenant_id, limit=15)
             all_memories.extend(memories)
 
-        # Sort by importance
-        all_memories.sort(key=lambda m: m.get("importance", 0), reverse=True)
+        # Filter out superseded memories
+        filtered = []
+        for mem in all_memories:
+            meta = mem.get("metadata", {})
+            if isinstance(meta, dict) and meta.get("superseded_at"):
+                continue  # Skip superseded facts
+            filtered.append(mem)
+
+        # Score by importance + recency
+        def temporal_score(mem: dict) -> float:
+            importance = mem.get("importance", 0.5)
+
+            # Recency boost: newer memories score higher
+            meta = mem.get("metadata", {})
+            recorded_at = ""
+            if isinstance(meta, dict):
+                recorded_at = meta.get("recorded_at", "")
+            if not recorded_at:
+                recorded_at = mem.get("created_at", "")
+
+            recency_boost = 0.0
+            if recorded_at:
+                try:
+                    # Simple recency: last 24h = +0.3, last week = +0.15, older = 0
+                    from datetime import timedelta
+                    rec_dt = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+                    now_dt = datetime.now(timezone.utc)
+                    age_hours = (now_dt - rec_dt).total_seconds() / 3600
+                    if age_hours < 24:
+                        recency_boost = 0.3
+                    elif age_hours < 168:  # 1 week
+                        recency_boost = 0.15
+                    elif age_hours < 720:  # 30 days
+                        recency_boost = 0.05
+                except Exception:
+                    pass
+
+            return importance + recency_boost
+
+        filtered.sort(key=temporal_score, reverse=True)
 
         # Build context within budget
         sections = {
-            "semantic": ("Domain Knowledge", []),
+            "semantic": ("Domain Knowledge (current facts)", []),
             "experiential": ("Lessons Learned", []),
             "design": ("Design Patterns", []),
-            "episodic": ("Recent Context", []),
+            "episodic": ("Recent Activity", []),
         }
 
         used_chars = 0
-        for mem in all_memories:
+        for mem in filtered:
             mtype = mem.get("type", "semantic")
             content = mem.get("content", "")
             title = mem.get("title", "")
 
-            # Truncate individual memory if needed
             entry = f"- {title}: {content[:300]}" if title else f"- {content[:300]}"
             entry_len = len(entry)
 

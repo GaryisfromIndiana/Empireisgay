@@ -239,14 +239,14 @@ class WebScraper:
                 logger.debug("URL already in memory: %s", page.url)
                 stored_memories = 0
             else:
-                # Store as bi-temporal fact with valid time from article date
+                # Store using smart temporal storage — auto-supersedes outdated facts
                 from core.memory.bitemporal import BiTemporalMemory
                 bt = BiTemporalMemory(self.empire_id)
-                bt.store_fact(
+                bt.store_smart(
                     content=f"Source: {page.url}\nTitle: {page.title}\n\n{page.content[:5000]}",
                     title=f"Web: {page.title[:80]}" if page.title else f"Web: {page.domain}",
                     category="web_scrape",
-                    valid_from=page.date or None,  # Article publish date = valid time
+                    valid_from=page.date or None,
                     importance=0.65,
                     confidence=0.7,
                     source=page.domain,
