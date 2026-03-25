@@ -106,17 +106,23 @@ class Lieutenant:
             self._quality_scores.append(result.quality_score)
         self._execution_times.append(duration)
 
-        # Store task outcome in memory
-        self.memory.store_task_outcome(
-            task_id=task.id,
-            task_title=task.title,
-            outcome=result.content[:1000],
-            success=result.success,
-            lieutenant_id=self.id,
-        )
+        # Store task outcome in memory (best-effort — don't crash directive on DB error)
+        try:
+            self.memory.store_task_outcome(
+                task_id=task.id,
+                task_title=task.title,
+                outcome=result.content[:1000],
+                success=result.success,
+                lieutenant_id=self.id,
+            )
+        except Exception as e:
+            logger.warning("[%s] Failed to store task outcome: %s", self.name, e)
 
-        # Extract entities for knowledge graph
-        self._extract_knowledge(result)
+        # Extract entities for knowledge graph (best-effort)
+        try:
+            self._extract_knowledge(result)
+        except Exception as e:
+            logger.warning("[%s] Failed to extract knowledge: %s", self.name, e)
 
         logger.info(
             "[%s] Task %s: %s (quality=%.2f, cost=$%.4f)",
@@ -346,20 +352,31 @@ class Lieutenant:
             if extraction.entities:
                 from core.knowledge.graph import KnowledgeGraph
                 graph = KnowledgeGraph(self.empire_id)
+
+                # Add all entities first, track which names were added
+                added_names = set()
                 for entity in extraction.entities:
-                    graph.add_entity(
-                        name=entity.get("name", ""),
-                        entity_type=entity.get("entity_type", "concept"),
-                        description=entity.get("description", ""),
-                        confidence=entity.get("confidence", 0.7),
-                        source_task_id=result.task_id,
-                    )
+                    name = entity.get("name", "").strip()
+                    if name:
+                        graph.add_entity(
+                            name=name,
+                            entity_type=entity.get("entity_type", "concept"),
+                            description=entity.get("description", ""),
+                            confidence=entity.get("confidence", 0.7),
+                            source_task_id=result.task_id,
+                        )
+                        added_names.add(name.lower())
+
+                # Only create relations where both entities exist
                 for relation in extraction.relations:
-                    graph.add_relation(
-                        source_name=relation.get("source", ""),
-                        target_name=relation.get("target", ""),
-                        relation_type=relation.get("type", "related_to"),
-                    )
+                    source = relation.get("source", "").strip()
+                    target = relation.get("target", "").strip()
+                    if source.lower() in added_names and target.lower() in added_names:
+                        graph.add_relation(
+                            source_name=source,
+                            target_name=target,
+                            relation_type=relation.get("type", "related_to"),
+                        )
         except Exception as e:
             logger.debug("Knowledge extraction failed: %s", e)
 

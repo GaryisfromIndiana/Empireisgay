@@ -226,23 +226,29 @@ class DirectiveManager:
                     wave_task_results.append(result.to_dict())
                     total_cost += result.cost_usd
 
-                    # Record task in DB
-                    from db.models import Task as TaskModel
-                    from db.engine import session_scope
-                    with session_scope() as db_session:
-                        db_task = TaskModel(
-                            directive_id=directive_id,
-                            lieutenant_id=lt.id,
-                            title=task_data.get("title", ""),
-                            description=task_data.get("description", ""),
-                            status="completed" if result.success else "failed",
-                            wave_number=wave_num,
-                            cost_usd=result.cost_usd,
-                            quality_score=result.quality_score,
-                            model_used=result.model_used,
-                            output_json={"content": result.content[:5000]},
-                        )
-                        db_session.add(db_task)
+                    # Record task in DB (best-effort)
+                    try:
+                        from db.models import Task as TaskModel
+                        from db.engine import session_scope
+                        with session_scope() as db_session:
+                            db_task = TaskModel(
+                                directive_id=directive_id,
+                                lieutenant_id=lt.id,
+                                title=task_data.get("title", "")[:256],
+                                description=task_data.get("description", "")[:5000],
+                                status="completed" if result.success else "failed",
+                                wave_number=wave_num,
+                                cost_usd=result.cost_usd,
+                                quality_score=result.quality_score,
+                                model_used=result.model_used,
+                                tokens_input=result.tokens_input,
+                                tokens_output=result.tokens_output,
+                                execution_time_seconds=result.execution_time_seconds,
+                                output_json={"content": result.content[:5000]},
+                            )
+                            db_session.add(db_task)
+                    except Exception as e:
+                        logger.warning("Failed to record task in DB: %s", e)
 
             wave_results.append({
                 "wave_number": wave_num,

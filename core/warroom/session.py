@@ -416,12 +416,16 @@ Respond as JSON:
             response = router.execute(request, TaskMetadata(task_type="analysis"))
             self._total_cost += response.cost_usd
 
-            try:
-                return json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                return json.loads(json_str) if json_str else {"summary": response.content}
+            from llm.schemas import _find_json_object, _extract_json_block
+            raw = response.content
+            # Try direct parse, then markdown block, then find object
+            for attempt_str in [raw, _extract_json_block(raw), _find_json_object(raw)]:
+                if attempt_str:
+                    try:
+                        return json.loads(attempt_str)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+            return {"summary": raw, "waves": []}
 
         except Exception as e:
             return {"summary": f"Synthesis failed: {e}", "decisions": [], "dissenting_views": []}
@@ -473,12 +477,16 @@ Respond as JSON:
             response = router.execute(request, TaskMetadata(task_type="planning"))
             self._total_cost += response.cost_usd
 
-            try:
-                return json.loads(response.content)
-            except json.JSONDecodeError:
-                from llm.schemas import _find_json_object
-                json_str = _find_json_object(response.content)
-                return json.loads(json_str) if json_str else {"summary": response.content}
+            from llm.schemas import _find_json_object, _extract_json_block
+            raw = response.content
+            # Try direct parse, then markdown block, then find object
+            for attempt_str in [raw, _extract_json_block(raw), _find_json_object(raw)]:
+                if attempt_str:
+                    try:
+                        return json.loads(attempt_str)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+            return {"summary": raw, "waves": []}
 
         except Exception as e:
             return {"summary": f"Plan synthesis failed: {e}"}
