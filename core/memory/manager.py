@@ -594,12 +594,15 @@ class MemoryManager:
                 memories = self.recall(memory_types=[mtype], lieutenant_id=lieutenant_id, limit=15)
             all_memories.extend(memories)
 
-        # Filter out superseded memories
+        # Filter out superseded and compressed-original memories
         filtered = []
         for mem in all_memories:
             meta = mem.get("metadata", {})
-            if isinstance(meta, dict) and meta.get("superseded_at"):
-                continue  # Skip superseded facts
+            if isinstance(meta, dict):
+                if meta.get("superseded_at"):
+                    continue  # Skip superseded facts
+                if meta.get("compressed"):
+                    continue  # Skip archived originals (compressed summary exists)
             filtered.append(mem)
 
         # Score by importance + recency

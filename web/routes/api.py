@@ -367,6 +367,48 @@ def api_memory_stats():
     return jsonify(mm.get_stats().__dict__)
 
 
+@api_bp.route("/memory/compress", methods=["POST"])
+def api_compress_memories():
+    """Run memory compression — distill clusters into concise knowledge."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.memory.compression import MemoryCompressor
+    compressor = MemoryCompressor(empire_id)
+    result = compressor.run_compression()
+    return jsonify({
+        "clusters_found": result.clusters_found,
+        "clusters_compressed": result.clusters_compressed,
+        "memories_consumed": result.memories_consumed,
+        "summaries_created": result.summaries_created,
+        "compression_ratio": f"{result.compression_ratio:.0%}",
+        "cost_usd": result.cost_usd,
+    })
+
+
+@api_bp.route("/memory/compress/topic", methods=["POST"])
+def api_compress_topic():
+    """Compress all memories about a specific topic."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json()
+    topic = data.get("topic", "")
+    if not topic:
+        return jsonify({"error": "Topic required"}), 400
+    from core.memory.compression import MemoryCompressor
+    compressor = MemoryCompressor(empire_id)
+    result = compressor.compress_by_topic(topic)
+    if result:
+        return jsonify(result)
+    return jsonify({"error": f"Not enough memories about '{topic}' to compress (need 3+)"})
+
+
+@api_bp.route("/memory/compress/stats")
+def api_compression_stats():
+    """Get compression statistics."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.memory.compression import MemoryCompressor
+    compressor = MemoryCompressor(empire_id)
+    return jsonify(compressor.get_compression_stats())
+
+
 @api_bp.route("/memory/temporal/store", methods=["POST"])
 def api_store_temporal():
     """Store a bi-temporal fact."""
