@@ -271,6 +271,91 @@ def api_entity_neighbors(entity_name: str):
     return jsonify([{"name": n.name, "type": n.entity_type, "depth": n.depth} for n in neighbors])
 
 
+@api_bp.route("/knowledge/ask")
+def api_knowledge_ask():
+    """Ask the knowledge graph a question."""
+    question = request.args.get("q", "")
+    if not question:
+        return jsonify({"error": "Query parameter 'q' required"}), 400
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.knowledge.query import KnowledgeQuerier
+    querier = KnowledgeQuerier(empire_id)
+    answer = querier.ask(question)
+    return jsonify({
+        "query": answer.query,
+        "entity": answer.entity_name,
+        "type": answer.entity_type,
+        "description": answer.description,
+        "attributes": {k: v for k, v in (answer.attributes or {}).items() if not str(k).startswith("_")},
+        "relations": answer.relations[:15],
+        "related_entities": answer.related_entities[:10],
+        "facts": [f.get("content", "")[:300] for f in answer.facts_from_memory[:5]],
+        "quality_score": answer.quality_score,
+        "confidence": answer.confidence,
+        "sources": answer.sources,
+    })
+
+
+@api_bp.route("/knowledge/profile/<entity_name>")
+def api_knowledge_profile(entity_name: str):
+    """Get structured knowledge profile for an entity."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.knowledge.query import KnowledgeQuerier
+    return jsonify(KnowledgeQuerier(empire_id).ask_structured(entity_name))
+
+
+@api_bp.route("/knowledge/compare")
+def api_knowledge_compare():
+    """Compare two entities."""
+    a = request.args.get("a", "")
+    b = request.args.get("b", "")
+    if not a or not b:
+        return jsonify({"error": "Parameters 'a' and 'b' required"}), 400
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.knowledge.query import KnowledgeQuerier
+    return jsonify(KnowledgeQuerier(empire_id).compare(a, b))
+
+
+@api_bp.route("/knowledge/schemas")
+def api_knowledge_schemas():
+    """List all entity type schemas."""
+    from core.knowledge.schemas import list_schemas
+    return jsonify(list_schemas())
+
+
+@api_bp.route("/knowledge/quality")
+def api_knowledge_quality():
+    """Get quality scores for knowledge entities."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.knowledge.quality import EntityQualityScorer
+    scorer = EntityQualityScorer(empire_id)
+    stats = scorer.get_quality_stats()
+    return jsonify(stats)
+
+
+@api_bp.route("/knowledge/duplicates")
+def api_knowledge_duplicates():
+    """Find duplicate entities."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.knowledge.resolution import EntityResolver
+    resolver = EntityResolver(empire_id)
+    groups = resolver.find_duplicates()
+    return jsonify([
+        {"entities": group, "count": len(group)}
+        for group in groups
+    ])
+
+
+@api_bp.route("/knowledge/merge-duplicates", methods=["POST"])
+def api_merge_duplicates():
+    """Find and merge all duplicate entities."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.knowledge.resolution import EntityResolver
+    resolver = EntityResolver(empire_id)
+    merged = resolver.merge_duplicates()
+    return jsonify({"merged": merged})
+
+
 # ── Memory ─────────────────────────────────────────────────────────────
 
 @api_bp.route("/memory/stats")

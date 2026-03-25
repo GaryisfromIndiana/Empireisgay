@@ -170,6 +170,26 @@ class KnowledgeGraph:
         repo.commit()
         return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
 
+    # Bidirectional relation labels
+    INVERSE_RELATIONS: dict[str, str] = {
+        "created_by": "created",
+        "created": "created_by",
+        "part_of": "contains",
+        "contains": "part_of",
+        "uses": "used_by",
+        "used_by": "uses",
+        "competes_with": "competes_with",
+        "related_to": "related_to",
+        "successor_of": "predecessor_of",
+        "predecessor_of": "successor_of",
+        "trained_on": "used_to_train",
+        "used_to_train": "trained_on",
+        "employed_at": "employs",
+        "employs": "employed_at",
+        "funded_by": "invested_in",
+        "invested_in": "funded_by",
+    }
+
     def add_relation(
         self,
         source_name: str,
@@ -178,8 +198,17 @@ class KnowledgeGraph:
         weight: float = 1.0,
         confidence: float = 0.8,
         metadata: dict | None = None,
+        valid_from: str | None = None,
+        valid_to: str | None = None,
+        evidence: str = "",
+        source_task_id: str = "",
     ) -> dict | None:
-        """Add a relation between two entities (by name).
+        """Add an enriched relation between two entities.
+
+        Relations are enriched with:
+        - Temporal bounds (valid_from/valid_to)
+        - Evidence (which task/source discovered this)
+        - Bidirectional labels
 
         Args:
             source_name: Source entity name.
@@ -188,26 +217,54 @@ class KnowledgeGraph:
             weight: Relation weight.
             confidence: Confidence score.
             metadata: Additional metadata.
+            valid_from: When this relation became true.
+            valid_to: When this relation stopped being true.
+            evidence: Text evidence for this relation.
+            source_task_id: Task that discovered this relation.
 
         Returns:
             Created relation info or None.
         """
+        # Use entity resolution for fuzzy matching
+        from core.knowledge.resolution import EntityResolver
+        resolver = EntityResolver(self.empire_id)
+
+        source_id, _ = resolver.resolve_and_get_id(source_name)
+        target_id, _ = resolver.resolve_and_get_id(target_name)
+
         repo = self._get_repo()
 
-        source = repo.get_by_name(source_name, self.empire_id)
-        target = repo.get_by_name(target_name, self.empire_id)
+        if not source_id:
+            source = repo.get_by_name(source_name, self.empire_id)
+            source_id = source.id if source else ""
+        if not target_id:
+            target = repo.get_by_name(target_name, self.empire_id)
+            target_id = target.id if target else ""
 
-        if not source or not target:
-            logger.warning("Cannot create relation: source=%s target=%s", source_name, target_name)
+        if not source_id or not target_id:
             return None
 
+        # Enrich metadata
+        from datetime import datetime as dt, timezone as tz
+        enriched_meta = dict(metadata or {})
+        enriched_meta["valid_from"] = valid_from
+        enriched_meta["valid_to"] = valid_to
+        enriched_meta["evidence"] = evidence
+        enriched_meta["source_task_id"] = source_task_id
+        enriched_meta["created_at"] = dt.now(tz.utc).isoformat()
+
+        # Get inverse label
+        inverse = self.INVERSE_RELATIONS.get(relation_type, "related_to")
+        enriched_meta["inverse_label"] = inverse
+        enriched_meta["forward_label"] = relation_type
+
         relation = repo.add_relation(
-            source_id=source.id,
-            target_id=target.id,
+            source_id=source_id,
+            target_id=target_id,
             relation_type=relation_type,
             weight=weight,
             confidence=confidence,
-            metadata=metadata,
+            metadata=enriched_meta,
         )
         repo.commit()
         return {
@@ -215,6 +272,7 @@ class KnowledgeGraph:
             "source": source_name,
             "target": target_name,
             "type": relation_type,
+            "inverse": inverse,
         }
 
     def find_entities(
