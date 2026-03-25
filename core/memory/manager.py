@@ -60,13 +60,11 @@ class MemoryManager:
         self._memory_repo = None
 
     def _get_repo(self):
-        """Lazy-load the memory repository."""
-        if self._memory_repo is None:
-            from db.engine import get_session
-            from db.repositories.memory import MemoryRepository
-            session = get_session()
-            self._memory_repo = MemoryRepository(session)
-        return self._memory_repo
+        """Get a fresh memory repository with its own session."""
+        from db.engine import get_session
+        from db.repositories.memory import MemoryRepository
+        session = get_session()
+        return MemoryRepository(session)
 
     def store(
         self,

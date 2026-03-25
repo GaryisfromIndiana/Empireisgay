@@ -48,12 +48,10 @@ class LieutenantManager:
         self._repo = None
 
     def _get_repo(self):
-        if self._repo is None:
-            from db.engine import get_session
-            from db.repositories.lieutenant import LieutenantRepository
-            session = get_session()
-            self._repo = LieutenantRepository(session)
-        return self._repo
+        """Get a fresh repository with its own session."""
+        from db.engine import get_session
+        from db.repositories.lieutenant import LieutenantRepository
+        return LieutenantRepository(get_session())
 
     def create_lieutenant(
         self,

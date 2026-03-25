@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
     <h1>Dashboard</h1>
-    <p>Empire overview and system status</p>
+    <p>What Empire knows — system status and latest research</p>
 </div>
 
 {% if health %}
@@ -19,17 +19,36 @@
         <div class="stat-label">Active Lieutenants</div>
     </div>
     <div class="card stat">
-        <div class="stat-value">{{ health.get('directives', {}).get('active', 0) }}</div>
-        <div class="stat-label">Active Directives</div>
-    </div>
-    <div class="card stat">
         <div class="stat-value">{{ health.get('knowledge', {}).get('entities', 0) }}</div>
         <div class="stat-label">Knowledge Entities</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value">{{ health.get('memory', {}).get('entries', 0) }}</div>
+        <div class="stat-label">Memories</div>
     </div>
 </div>
 {% endif %}
 
 <div class="grid grid-2">
+    <div class="card">
+        <h2>Budget</h2>
+        {% if budget %}
+        <div class="grid grid-2" style="margin-bottom: 1rem;">
+            <div class="stat">
+                <div class="stat-value mono">${{ "%.4f"|format(budget.daily_spend) }}</div>
+                <div class="stat-label">Today's Spend</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value mono">${{ "%.2f"|format(budget.daily_remaining) }}</div>
+                <div class="stat-label">Daily Remaining</div>
+            </div>
+        </div>
+        {% for alert in budget.get('alerts', []) %}
+        <div class="alert alert-warning">{{ alert.message }}</div>
+        {% endfor %}
+        {% endif %}
+    </div>
+
     <div class="card">
         <h2>Active Directives</h2>
         {% if active_directives %}
@@ -49,42 +68,81 @@
         <p class="text-muted">No active directives</p>
         {% endif %}
     </div>
-
-    <div class="card">
-        <h2>Budget</h2>
-        {% if budget %}
-        <div class="grid grid-2" style="margin-bottom: 1rem;">
-            <div class="stat">
-                <div class="stat-value mono">${{ "%.4f"|format(budget.daily_spend) }}</div>
-                <div class="stat-label">Today's Spend</div>
-            </div>
-            <div class="stat">
-                <div class="stat-value mono">${{ "%.2f"|format(budget.daily_remaining) }}</div>
-                <div class="stat-label">Daily Remaining</div>
-            </div>
-        </div>
-        {% for alert in budget.get('alerts', []) %}
-        <div class="alert alert-warning">{{ alert.message }}</div>
-        {% endfor %}
-        {% endif %}
-    </div>
 </div>
 
 {% if recent_completed %}
 <div class="card" style="margin-top: 1rem;">
-    <h2>Recently Completed</h2>
+    <h2>Completed Research</h2>
     <table>
-        <thead><tr><th>Title</th><th>Quality</th><th>Cost</th></tr></thead>
+        <thead><tr><th>Title</th><th>Quality</th><th>Cost</th><th>Report</th></tr></thead>
         <tbody>
         {% for d in recent_completed %}
         <tr>
             <td><a href="/directives/{{ d.id }}">{{ d.title }}</a></td>
             <td>{{ "%.2f"|format(d.quality or 0) }}</td>
             <td class="mono">${{ "%.4f"|format(d.cost or 0) }}</td>
+            <td><a href="/directives/{{ d.id }}" class="btn" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">View</a></td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
+</div>
+{% endif %}
+
+{% if latest_research %}
+<div class="card" style="margin-top: 1rem;">
+    <h2>Latest Research & Findings</h2>
+    {% for entry in latest_research %}
+    <div style="padding: 0.75rem 0; border-bottom: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>{{ entry.title or entry.content[:60] }}</strong>
+            <span class="text-muted" style="font-size: 0.75rem;">{{ entry.created_at[:10] if entry.created_at else '' }}</span>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem;">
+            {{ entry.content[:250] }}{% if entry.content|length > 250 %}...{% endif %}
+        </p>
+        {% if entry.tags %}
+        <div style="margin-top: 0.25rem;">
+            {% for tag in entry.tags[:4] %}
+            <span class="badge badge-purple" style="margin-right: 0.25rem;">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if latest_feeds %}
+<div class="card" style="margin-top: 1rem;">
+    <h2>Latest from AI Feeds</h2>
+    {% for entry in latest_feeds %}
+    <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+        <a href="{{ entry.url }}" style="font-weight: 500;">{{ entry.title[:80] }}</a>
+        <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ entry.source }}</span>
+        <p style="color: var(--text-secondary); font-size: 0.82rem; margin-top: 0.15rem;">
+            {{ entry.summary[:150] }}{% if entry.summary|length > 150 %}...{% endif %}
+        </p>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if knowledge_highlights %}
+<div class="card" style="margin-top: 1rem;">
+    <h2>Knowledge Graph Highlights</h2>
+    <div class="grid grid-3">
+        {% for entity in knowledge_highlights %}
+        <div style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px;">
+            <div style="font-weight: 600;">{{ entity.name }}</div>
+            <span class="badge badge-purple" style="font-size: 0.65rem;">{{ entity.type }}</span>
+            <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.25rem;">{{ "%.0f"|format(entity.confidence * 100) }}%</span>
+        </div>
+        {% endfor %}
+    </div>
+    <div style="margin-top: 0.75rem;">
+        <a href="/knowledge" class="btn" style="font-size: 0.8rem;">Explore Knowledge Graph →</a>
+    </div>
 </div>
 {% endif %}
 {% endblock %}

@@ -11,7 +11,7 @@ from typing import Generator, Any
 from sqlalchemy import create_engine, event, text, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker, scoped_session
-from sqlalchemy.pool import StaticPool, QueuePool
+from sqlalchemy.pool import StaticPool, NullPool
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +71,7 @@ def get_engine(db_url: str | None = None, echo: bool = False) -> Engine:
                 db_url,
                 echo=echo,
                 connect_args={"check_same_thread": False},
-                poolclass=StaticPool if ":memory:" in db_url else QueuePool,
-                pool_pre_ping=True,
+                poolclass=StaticPool if ":memory:" in db_url else NullPool,
             )
             event.listen(engine, "connect", _configure_sqlite)
         else:

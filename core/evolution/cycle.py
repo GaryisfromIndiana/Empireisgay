@@ -48,12 +48,10 @@ class EvolutionCycleManager:
         self._repo = None
 
     def _get_repo(self):
-        if self._repo is None:
-            from db.engine import get_session
-            from db.repositories.evolution import EvolutionRepository
-            session = get_session()
-            self._repo = EvolutionRepository(session)
-        return self._repo
+        """Get a fresh repository with its own session."""
+        from db.engine import get_session
+        from db.repositories.evolution import EvolutionRepository
+        return EvolutionRepository(get_session())
 
     def should_run_cycle(self) -> bool:
         """Check if a new cycle should be started."""

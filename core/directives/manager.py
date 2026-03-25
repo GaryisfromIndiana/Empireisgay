@@ -63,12 +63,10 @@ class DirectiveManager:
         self._repo = None
 
     def _get_repo(self):
-        if self._repo is None:
-            from db.engine import get_session
-            from db.repositories.directive import DirectiveRepository
-            session = get_session()
-            self._repo = DirectiveRepository(session)
-        return self._repo
+        """Get a fresh repository with its own session."""
+        from db.engine import get_session
+        from db.repositories.directive import DirectiveRepository
+        return DirectiveRepository(get_session())
 
     def create_directive(
         self,
@@ -173,7 +171,37 @@ class DirectiveManager:
         repo.update(directive_id, status="executing", pipeline_stage="executing")
         repo.commit()
 
-        waves = plan_result.get("unified_plan", {}).get("waves", [])
+        unified_plan = plan_result.get("unified_plan", {})
+
+        # Parse waves — handle string-wrapped JSON from LLM
+        waves = unified_plan.get("waves", [])
+        if isinstance(waves, str):
+            import json as _json
+            try:
+                waves = _json.loads(waves)
+            except Exception:
+                waves = []
+
+        # If no waves from planning, build default waves from the directive
+        if not waves:
+            logger.warning("No waves from War Room — building default task set")
+            description_parts = db_directive.description.split(",")
+            default_tasks = []
+            for i, part in enumerate(description_parts[:6]):
+                part = part.strip().strip("()")
+                if len(part) > 10:
+                    default_tasks.append({"title": part[:100], "description": f"Research and analyze: {part}"})
+
+            if not default_tasks:
+                default_tasks = [{"title": db_directive.title, "description": db_directive.description}]
+
+            # Split into 2 waves
+            mid = max(1, len(default_tasks) // 2)
+            waves = [
+                {"wave_number": 1, "tasks": default_tasks[:mid]},
+                {"wave_number": 2, "tasks": default_tasks[mid:]},
+            ]
+
         wave_results = []
         total_cost = 0.0
 

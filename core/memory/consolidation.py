@@ -53,12 +53,10 @@ class MemoryConsolidator:
         self._repo = None
 
     def _get_repo(self):
-        if self._repo is None:
-            from db.engine import get_session
-            from db.repositories.memory import MemoryRepository
-            session = get_session()
-            self._repo = MemoryRepository(session)
-        return self._repo
+        """Get a fresh repository with its own session."""
+        from db.engine import get_session
+        from db.repositories.memory import MemoryRepository
+        return MemoryRepository(get_session())
 
     def run_consolidation(self, lieutenant_id: str = "") -> ConsolidationResult:
         """Run a full consolidation pass.

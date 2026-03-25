@@ -88,6 +88,20 @@ def create_app(config: dict | None = None) -> Flask:
         logger.error("Server error: %s", e)
         return {"error": "Internal server error"}, 500
 
+    # Create scheduler daemon (starts paused — use /scheduler/tick or CLI to run)
+    import os
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG"):
+        try:
+            from core.scheduler.daemon import SchedulerDaemon
+            empire_id = app.config.get("EMPIRE_ID", "")
+            daemon = SchedulerDaemon(empire_id, tick_interval=300)  # 5 min ticks
+            app.config["_SCHEDULER_DAEMON"] = daemon
+            # Don't auto-start — avoids DB contention with directive execution
+            # Start manually: POST /scheduler/tick or CLI: python -m cli.commands scheduler start
+            logger.info("Scheduler daemon ready (use /scheduler/tick to run)")
+        except Exception as e:
+            logger.warning("Could not create scheduler: %s", e)
+
     logger.info("Empire web app created: %s", settings.empire_name)
     return app
 

@@ -62,12 +62,10 @@ class KnowledgeSearchEngine:
         self._repo = None
 
     def _get_repo(self):
-        if self._repo is None:
-            from db.engine import get_session
-            from db.repositories.knowledge import KnowledgeRepository
-            session = get_session()
-            self._repo = KnowledgeRepository(session)
-        return self._repo
+        """Get a fresh repository with its own session."""
+        from db.engine import get_session
+        from db.repositories.knowledge import KnowledgeRepository
+        return KnowledgeRepository(get_session())
 
     def text_search(
         self,
