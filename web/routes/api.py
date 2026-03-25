@@ -282,6 +282,107 @@ def api_memory_stats():
     return jsonify(mm.get_stats().__dict__)
 
 
+@api_bp.route("/memory/temporal/store", methods=["POST"])
+def api_store_temporal():
+    """Store a bi-temporal fact."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json()
+    from core.memory.bitemporal import BiTemporalMemory
+    bt = BiTemporalMemory(empire_id)
+    fact = bt.store_fact(
+        content=data.get("content", ""),
+        title=data.get("title", ""),
+        category=data.get("category", ""),
+        valid_from=data.get("valid_from"),
+        valid_to=data.get("valid_to"),
+        confidence=data.get("confidence", 0.8),
+        importance=data.get("importance", 0.6),
+        source=data.get("source", ""),
+        source_url=data.get("source_url", ""),
+        tags=data.get("tags", []),
+        entity_refs=data.get("entity_refs", []),
+    )
+    return jsonify({
+        "id": fact.id, "title": fact.title, "version": fact.version,
+        "valid_from": fact.valid_from, "valid_to": fact.valid_to,
+        "recorded_at": fact.recorded_at,
+    }), 201
+
+
+@api_bp.route("/memory/temporal/query")
+def api_temporal_query():
+    """Query bi-temporal memory."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.memory.bitemporal import BiTemporalMemory, TemporalQuery
+    bt = BiTemporalMemory(empire_id)
+    tq = TemporalQuery(
+        query=request.args.get("q", ""),
+        as_of_valid=request.args.get("as_of_valid"),
+        as_of_recorded=request.args.get("as_of_recorded"),
+        include_superseded=request.args.get("include_superseded", "false").lower() == "true",
+        limit=int(request.args.get("limit", 20)),
+    )
+    facts = bt.query(tq)
+    return jsonify([{
+        "id": f.id, "title": f.title, "content": f.content[:500],
+        "valid_from": f.valid_from, "valid_to": f.valid_to,
+        "recorded_at": f.recorded_at, "superseded_at": f.superseded_at,
+        "version": f.version, "confidence": f.confidence,
+        "source": f.source, "tags": f.tags,
+    } for f in facts])
+
+
+@api_bp.route("/memory/temporal/timeline")
+def api_fact_timeline():
+    """Get version history of a fact."""
+    title = request.args.get("title", "")
+    if not title:
+        return jsonify({"error": "title parameter required"}), 400
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.memory.bitemporal import BiTemporalMemory
+    bt = BiTemporalMemory(empire_id)
+    timeline = bt.get_fact_timeline(title)
+    return jsonify({
+        "topic": timeline.topic,
+        "current_version": timeline.current_version,
+        "first_recorded": timeline.first_recorded,
+        "last_updated": timeline.last_updated,
+        "versions": [
+            {"version": v.version, "content": v.content, "recorded_at": v.recorded_at,
+             "superseded_at": v.superseded_at, "confidence": v.confidence, "source": v.source}
+            for v in timeline.versions
+        ],
+    })
+
+
+@api_bp.route("/memory/temporal/snapshot")
+def api_temporal_snapshot():
+    """Get what Empire knew at a point in time."""
+    as_of = request.args.get("as_of", "")
+    if not as_of:
+        return jsonify({"error": "as_of parameter required (ISO datetime)"}), 400
+    time_type = request.args.get("type", "recorded")
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.memory.bitemporal import BiTemporalMemory
+    bt = BiTemporalMemory(empire_id)
+    snapshot = bt.get_snapshot(as_of, time_type)
+    return jsonify({
+        "as_of": snapshot.as_of,
+        "type": snapshot.snapshot_type,
+        "total_facts": snapshot.total_facts,
+        "facts": [{"title": f.title, "content": f.content[:300], "version": f.version} for f in snapshot.facts[:20]],
+    })
+
+
+@api_bp.route("/memory/temporal/stats")
+def api_temporal_stats():
+    """Get bi-temporal memory statistics."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.memory.bitemporal import BiTemporalMemory
+    bt = BiTemporalMemory(empire_id)
+    return jsonify(bt.get_temporal_stats())
+
+
 @api_bp.route("/memory/search")
 def api_memory_search():
     """Search memories."""

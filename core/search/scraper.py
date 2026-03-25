@@ -239,16 +239,19 @@ class WebScraper:
                 logger.debug("URL already in memory: %s", page.url)
                 stored_memories = 0
             else:
-                content_to_store = f"Source: {page.url}\nTitle: {page.title}\n\n{page.content[:5000]}"
-                mm.store(
-                    content=content_to_store,
-                    memory_type="semantic",
+                # Store as bi-temporal fact with valid time from article date
+                from core.memory.bitemporal import BiTemporalMemory
+                bt = BiTemporalMemory(self.empire_id)
+                bt.store_fact(
+                    content=f"Source: {page.url}\nTitle: {page.title}\n\n{page.content[:5000]}",
                     title=f"Web: {page.title[:80]}" if page.title else f"Web: {page.domain}",
                     category="web_scrape",
+                    valid_from=page.date or None,  # Article publish date = valid time
                     importance=0.65,
+                    confidence=0.7,
+                    source=page.domain,
+                    source_url=url,
                     tags=["web_scrape", page.domain],
-                    source_type="web_scrape",
-                    metadata={"url": url, "domain": page.domain, "author": page.author, "date": page.date},
                 )
                 stored_memories = 1
 
