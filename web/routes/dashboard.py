@@ -77,8 +77,34 @@ def index():
         except Exception:
             pass
 
+        # Recent discoveries from sweeps
+        recent_discoveries = []
+        try:
+            from core.search.sweep import IntelligenceSweep
+            sweep = IntelligenceSweep(empire_id)
+            recent_discoveries = sweep.get_recent_discoveries(limit=5)
+        except Exception:
+            pass
+
+        # Scheduler status
+        scheduler_info = {}
+        try:
+            daemon = current_app.config.get("_SCHEDULER_DAEMON")
+            if daemon:
+                status = daemon.get_status()
+                scheduler_info = {
+                    "running": status.running,
+                    "total_ticks": status.total_ticks,
+                    "total_jobs": status.total_job_runs,
+                    "errors": status.errors,
+                }
+        except Exception:
+            pass
+
         context = {
             "health": health,
+            "scheduler": scheduler_info,
+            "recent_discoveries": recent_discoveries,
             "active_directives": [
                 {"id": d.id, "title": d.title, "status": d.status, "priority": d.priority}
                 for d in active_directives

@@ -683,6 +683,37 @@ def api_scrape_and_store():
     return jsonify(scraper.scrape_and_store(url))
 
 
+@api_bp.route("/sweep", methods=["POST"])
+def api_intelligence_sweep():
+    """Run an intelligence sweep — proactive discovery across AI sources."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.search.sweep import IntelligenceSweep
+    sweep = IntelligenceSweep(empire_id)
+    result = sweep.run_full_sweep()
+    return jsonify({
+        "sources_checked": result.sources_checked,
+        "total_found": result.total_found,
+        "novel_items": result.novel_items,
+        "stored_memories": result.stored_memories,
+        "stored_entities": result.stored_entities,
+        "discoveries": [
+            {"title": d.title, "source": d.source, "category": d.category, "is_novel": d.is_novel}
+            for d in result.discoveries[:10]
+        ],
+        "duration_seconds": result.duration_seconds,
+        "errors": result.errors,
+    })
+
+
+@api_bp.route("/sweep/discoveries")
+def api_sweep_discoveries():
+    """Get recent discoveries from intelligence sweeps."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.search.sweep import IntelligenceSweep
+    sweep = IntelligenceSweep(empire_id)
+    return jsonify(sweep.get_recent_discoveries(limit=int(request.args.get("limit", 20))))
+
+
 @api_bp.route("/research", methods=["POST"])
 def api_research_topic():
     """Search, scrape, and synthesize research on a topic.

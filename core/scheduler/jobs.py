@@ -348,6 +348,96 @@ class CleanupJob(BaseJob):
         )
 
 
+class IntelligenceSweepJob(BaseJob):
+    """Proactive intelligence sweep across AI sources."""
+
+    name = "intelligence_sweep"
+    description = "Sweep HuggingFace, GitHub, arXiv, feeds for new AI developments"
+    interval_seconds = 12 * 3600  # 12 hours
+    priority = 6
+
+    def run(self) -> JobResult:
+        from core.search.sweep import IntelligenceSweep
+        sweep = IntelligenceSweep(self.empire_id)
+        result = sweep.run_full_sweep()
+        return JobResult(
+            success=True,
+            data={
+                "sources_checked": result.sources_checked,
+                "total_found": result.total_found,
+                "novel_items": result.novel_items,
+                "stored_memories": result.stored_memories,
+                "stored_entities": result.stored_entities,
+                "errors": result.errors[:3],
+            },
+            items_processed=result.novel_items,
+        )
+
+
+class MemoryCompressionJob(BaseJob):
+    """Compress old episodic memories into semantic summaries."""
+
+    name = "memory_compression"
+    description = "Compress and summarize old memories"
+    interval_seconds = 24 * 3600  # 24 hours
+    priority = 7
+
+    def run(self) -> JobResult:
+        from core.memory.consolidation import MemoryConsolidator
+        consolidator = MemoryConsolidator(self.empire_id)
+        result = consolidator.run_consolidation()
+        return JobResult(
+            success=True,
+            data={
+                "duplicates_merged": result.duplicates_merged,
+                "promoted": result.promoted_count,
+                "summarized": result.summarized_count,
+            },
+            items_processed=result.total_processed,
+        )
+
+
+class QualityScoringJob(BaseJob):
+    """Score knowledge graph entities for quality."""
+
+    name = "quality_scoring"
+    description = "Rate knowledge entities across 8 quality dimensions"
+    interval_seconds = 12 * 3600  # 12 hours
+    priority = 7
+
+    def run(self) -> JobResult:
+        from core.knowledge.quality import EntityQualityScorer
+        scorer = EntityQualityScorer(self.empire_id)
+        stats = scorer.get_quality_stats()
+        return JobResult(
+            success=True,
+            data=stats,
+            items_processed=stats.get("total", 0),
+        )
+
+
+class DuplicateResolutionJob(BaseJob):
+    """Find and merge duplicate entities in the knowledge graph."""
+
+    name = "duplicate_resolution"
+    description = "Resolve duplicate entities using fuzzy matching"
+    interval_seconds = 24 * 3600  # 24 hours
+    priority = 8
+
+    def run(self) -> JobResult:
+        from core.knowledge.resolution import EntityResolver
+        resolver = EntityResolver(self.empire_id)
+        duplicates = resolver.find_duplicates()
+        merged = 0
+        if duplicates:
+            merged = resolver.merge_duplicates()
+        return JobResult(
+            success=True,
+            data={"duplicate_groups": len(duplicates), "merged": merged},
+            items_processed=merged,
+        )
+
+
 # Job registry
 JOB_REGISTRY: dict[str, type[BaseJob]] = {
     "learning_cycle": LearningCycleJob,
@@ -360,6 +450,10 @@ JOB_REGISTRY: dict[str, type[BaseJob]] = {
     "autonomous_research": AutonomousResearchJob,
     "directive_check": DirectiveCheckJob,
     "cleanup": CleanupJob,
+    "intelligence_sweep": IntelligenceSweepJob,
+    "memory_compression": MemoryCompressionJob,
+    "quality_scoring": QualityScoringJob,
+    "duplicate_resolution": DuplicateResolutionJob,
 }
 
 

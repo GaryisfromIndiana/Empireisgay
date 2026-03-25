@@ -3,7 +3,18 @@
 {% block content %}
 <div class="page-header">
     <h1>Dashboard</h1>
-    <p>What Empire knows — system status and latest research</p>
+    <p>What Empire knows — system status and latest research
+    {% if scheduler %}
+    <span style="margin-left: 1rem;">
+        {% if scheduler.running %}
+            <span class="badge badge-green">Scheduler Running</span>
+            <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ scheduler.total_ticks }} ticks, {{ scheduler.total_jobs }} jobs</span>
+        {% else %}
+            <span class="badge badge-amber">Scheduler Paused</span>
+        {% endif %}
+    </span>
+    {% endif %}
+    </p>
 </div>
 
 {% if health %}
@@ -125,6 +136,26 @@
         </p>
     </div>
     {% endfor %}
+</div>
+{% endif %}
+
+{% if recent_discoveries %}
+<div class="card" style="margin-top: 1rem;">
+    <h2>Recent Discoveries</h2>
+    {% for entry in recent_discoveries %}
+    <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--border);">
+        <strong>{{ entry.title or entry.content[:60] }}</strong>
+        <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ entry.created_at[:10] if entry.created_at else '' }}</span>
+        {% if entry.tags %}
+        <div style="margin-top: 0.15rem;">
+            {% for tag in entry.tags[:3] %}
+            <span class="badge badge-blue" style="font-size: 0.6rem; margin-right: 0.2rem;">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    <div style="margin-top: 0.5rem;"><a href="/api/sweep/discoveries" class="btn" style="font-size: 0.8rem;">View All Discoveries →</a></div>
 </div>
 {% endif %}
 
