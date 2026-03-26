@@ -227,12 +227,13 @@ class DirectiveManager:
             repo.commit()
 
             wave_task_results = []
-            # Execute all tasks in this wave, collect results
             task_records = []
 
+            # Assign lieutenants to tasks before execution
+            from core.ace.engine import TaskInput
+            task_assignments = []
             for task_data in tasks:
                 lt = lt_manager.find_best_lieutenant(task_data.get("description", ""))
-
                 if not lt:
                     logger.warning("No lieutenant found for task: %s", task_data.get("title", "?")[:50])
                     wave_task_results.append({
@@ -243,31 +244,43 @@ class DirectiveManager:
                         "cost_usd": 0,
                     })
                     continue
+                task_assignments.append((task_data, lt))
 
-                try:
-                    from core.ace.engine import TaskInput
-                    task = TaskInput(
-                        title=task_data.get("title", ""),
-                        description=task_data.get("description", ""),
-                    )
-                    result = lt.execute_task(task)
-                    wave_task_results.append(result.to_dict())
-                    total_cost += result.cost_usd
+            # Execute tasks in parallel within the wave
+            from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                    task_records.append({
-                        "lt_id": lt.id,
-                        "task_data": task_data,
-                        "result": result,
-                    })
-                except Exception as e:
-                    logger.error("Task '%s' failed: %s", task_data.get("title", "?")[:50], e)
-                    wave_task_results.append({
-                        "title": task_data.get("title", ""),
-                        "success": False,
-                        "error": str(e),
-                        "quality_score": 0,
-                        "cost_usd": 0,
-                    })
+            def _execute_one(task_data_and_lt):
+                td, lt = task_data_and_lt
+                task = TaskInput(title=td.get("title", ""), description=td.get("description", ""))
+                result = lt.execute_task(task)
+                return td, lt, result
+
+            with ThreadPoolExecutor(max_workers=min(3, len(task_assignments) or 1)) as executor:
+                future_to_task = {
+                    executor.submit(_execute_one, assignment): assignment[0]
+                    for assignment in task_assignments
+                }
+
+                for future in as_completed(future_to_task):
+                    orig_task_data = future_to_task[future]
+                    try:
+                        td, lt, result = future.result()
+                        wave_task_results.append(result.to_dict())
+                        total_cost += result.cost_usd
+                        task_records.append({
+                            "lt_id": lt.id,
+                            "task_data": td,
+                            "result": result,
+                        })
+                    except Exception as e:
+                        logger.error("Task '%s' failed: %s", orig_task_data.get("title", "?")[:50], e)
+                        wave_task_results.append({
+                            "title": orig_task_data.get("title", ""),
+                            "success": False,
+                            "error": str(e),
+                            "quality_score": 0,
+                            "cost_usd": 0,
+                        })
 
             # Batch insert all task records in ONE session per wave
             try:
