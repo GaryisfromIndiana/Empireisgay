@@ -643,17 +643,19 @@ def api_health_debug():
 
     # Test actual Anthropic API call
     try:
-        import anthropic
+        from llm.anthropic import AnthropicClient
         key = os.environ.get("EMPIRE_ANTHROPIC_API_KEY", "")
         if key:
-            client = anthropic.Anthropic(api_key=key)
-            resp = client.messages.create(
+            from llm.base import LLMRequest, LLMMessage
+            client = AnthropicClient(key)
+            resp = client.complete(LLMRequest(
+                messages=[LLMMessage.user("Say hi in 3 words")],
                 model="claude-haiku-4-5-20251001",
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Say hi"}],
-            )
+                max_tokens=20,
+            ))
             result["anthropic_test"] = "OK"
-            result["anthropic_response"] = resp.content[0].text[:50]
+            result["anthropic_response"] = resp.content[:50]
+            result["anthropic_cost"] = resp.cost_usd
         else:
             result["anthropic_test"] = "no key"
     except Exception as e:
