@@ -619,19 +619,72 @@ def api_budget():
 
 @api_bp.route("/health/debug")
 def api_health_debug():
-    """Debug endpoint — shows Redis connection info."""
+    """Debug endpoint — shows env vars, LLM connectivity, scheduler state."""
     import os
-    redis_url = os.environ.get("REDIS_URL", "")
-    redis_public = os.environ.get("REDIS_PUBLIC_URL", "")
-    from llm.cache import get_cache
-    cache = get_cache()
-    return jsonify({
-        "redis_url_set": bool(redis_url),
-        "redis_url_prefix": redis_url[:25] + "..." if redis_url else "not set",
-        "redis_public_url_set": bool(redis_public),
-        "cache_enabled": cache.enabled,
-        "cache_redis_url_prefix": cache._redis_url[:25] + "..." if cache._redis_url else "none",
-    })
+    import traceback
+
+    result = {
+        "redis_url_set": bool(os.environ.get("REDIS_URL")),
+        "redis_url_prefix": (os.environ.get("REDIS_URL", "")[:25] + "...") if os.environ.get("REDIS_URL") else "not set",
+        "anthropic_key_set": bool(os.environ.get("EMPIRE_ANTHROPIC_API_KEY")),
+        "anthropic_key_prefix": os.environ.get("EMPIRE_ANTHROPIC_API_KEY", "")[:15] + "..." if os.environ.get("EMPIRE_ANTHROPIC_API_KEY") else "not set",
+        "db_url_set": bool(os.environ.get("EMPIRE_DB_URL")),
+        "db_url_prefix": (os.environ.get("EMPIRE_DB_URL", "")[:30] + "...") if os.environ.get("EMPIRE_DB_URL") else "not set",
+    }
+
+    # Check LLM connectivity
+    try:
+        from config.settings import get_settings
+        settings = get_settings()
+        result["settings_anthropic_key_set"] = bool(settings.anthropic_api_key)
+        result["settings_anthropic_key_prefix"] = settings.anthropic_api_key[:15] + "..." if settings.anthropic_api_key else "not set"
+    except Exception as e:
+        result["settings_error"] = str(e)
+
+    # Test actual Anthropic API call
+    try:
+        import anthropic
+        key = os.environ.get("EMPIRE_ANTHROPIC_API_KEY", "")
+        if key:
+            client = anthropic.Anthropic(api_key=key)
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=10,
+                messages=[{"role": "user", "content": "Say hi"}],
+            )
+            result["anthropic_test"] = "OK"
+            result["anthropic_response"] = resp.content[0].text[:50]
+        else:
+            result["anthropic_test"] = "no key"
+    except Exception as e:
+        result["anthropic_test"] = f"FAILED: {e}"
+        result["anthropic_traceback"] = traceback.format_exc()[-500:]
+
+    # Check scheduler
+    try:
+        daemon = current_app.config.get("_SCHEDULER_DAEMON")
+        if daemon:
+            status = daemon.get_status()
+            result["scheduler_running"] = status.running
+            result["scheduler_ticks"] = status.total_ticks
+            result["scheduler_errors"] = status.errors
+            result["scheduler_jobs_active"] = status.jobs_active
+        else:
+            result["scheduler_running"] = False
+            result["scheduler_note"] = "daemon not initialized"
+    except Exception as e:
+        result["scheduler_error"] = str(e)
+
+    # Cache stats
+    try:
+        from llm.cache import get_cache
+        cache = get_cache()
+        result["cache_enabled"] = cache.enabled
+        result["cache_stats"] = cache.get_stats()
+    except Exception as e:
+        result["cache_error"] = str(e)
+
+    return jsonify(result)
 
 
 @api_bp.route("/health")
