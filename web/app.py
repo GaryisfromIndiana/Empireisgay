@@ -88,7 +88,9 @@ def create_app(config: dict | None = None) -> Flask:
         logger.error("Server error: %s", e)
         return {"error": "Internal server error"}, 500
 
-    # Start scheduler daemon — use file lock to ensure only one worker runs it
+    # Start scheduler daemon — every worker gets a daemon object,
+    # but only auto-starts on Postgres. Multiple start() calls are safe
+    # because SchedulerDaemon.start() is a no-op if already running.
     import os
     is_worker = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG")
     if is_worker:
@@ -98,17 +100,9 @@ def create_app(config: dict | None = None) -> Flask:
             daemon = SchedulerDaemon(empire_id, tick_interval=300)  # 5 min ticks
             app.config["_SCHEDULER_DAEMON"] = daemon
 
-            # Auto-start on Postgres; use file lock to prevent duplicate daemons
             if "postgresql" in settings.db_url:
-                lock_file = "/tmp/empire_scheduler.lock"
-                try:
-                    fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                    os.write(fd, str(os.getpid()).encode())
-                    os.close(fd)
-                    daemon.start()
-                    logger.info("Scheduler daemon STARTED (Postgres — 5 min ticks, pid %d)", os.getpid())
-                except FileExistsError:
-                    logger.info("Scheduler daemon already running in another worker — skipping")
+                daemon.start()
+                logger.info("Scheduler daemon STARTED (Postgres — 5 min ticks)")
             else:
                 logger.info("Scheduler daemon ready (SQLite — use /scheduler/start)")
         except Exception as e:

@@ -214,14 +214,38 @@ class SchedulerDaemon:
 
             self._stop_event.wait(timeout=self.tick_interval)
 
+    def _try_acquire_tick_lock(self) -> bool:
+        """Try to acquire a Postgres advisory lock for this tick.
+
+        Returns True if this worker should run the tick.
+        On SQLite or connection failure, always returns True.
+        """
+        try:
+            from db.engine import get_engine
+            engine = get_engine()
+            if "postgresql" not in str(engine.url):
+                return True
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT pg_try_advisory_lock(42)"))
+                acquired = result.scalar()
+                if acquired:
+                    conn.execute(text("SELECT pg_advisory_unlock(42)"))
+                return bool(acquired)
+        except Exception:
+            return True
+
     def tick(self) -> list[str]:
         """Execute a single scheduler tick.
 
-        Checks all jobs, runs any that are due.
+        Uses Postgres advisory lock so only one worker runs jobs per tick.
 
         Returns:
             List of job names that were executed.
         """
+        if not self._try_acquire_tick_lock():
+            return []
+
         self._tick_count += 1
         now = datetime.now(timezone.utc)
         executed = []
