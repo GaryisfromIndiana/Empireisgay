@@ -249,7 +249,11 @@ class SchedulerDaemon:
             self._jobs.pop(job_name, None)
 
     def start(self) -> None:
-        """Start the scheduler daemon in a background thread."""
+        """Start the scheduler daemon in a background thread.
+
+        Staggers job first-runs so they don't all fire on the first tick.
+        Only health_check and budget_check run immediately; others wait their interval.
+        """
         if self._running:
             logger.warning("Scheduler already running")
             return
@@ -257,6 +261,14 @@ class SchedulerDaemon:
         self._running = True
         self._start_time = time.time()
         self._stop_event.clear()
+
+        # Stagger jobs — set last_run to now so they wait their full interval
+        # Only quick jobs (health_check, budget_check, directive_check) run on first tick
+        now = datetime.now(timezone.utc)
+        immediate_jobs = {"health_check", "budget_check", "directive_check"}
+        for job in self._jobs.values():
+            if job.name not in immediate_jobs:
+                job.last_run = now  # Will wait full interval before first run
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="empire-scheduler")
         self._thread.start()
