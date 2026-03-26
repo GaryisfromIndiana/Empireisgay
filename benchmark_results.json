@@ -1,0 +1,173 @@
+{
+  "timestamp": "2026-03-26T02:32:49.816993+00:00",
+  "iterations": 3,
+  "tests": {
+    "db_session": {
+      "baseline": {
+        "test_name": "db_session_baseline",
+        "iterations": 3,
+        "avg_duration_ms": 22.99,
+        "min_duration_ms": 4.96,
+        "max_duration_ms": 57.7,
+        "std_dev_ms": 30.07,
+        "total_cost_usd": 0.0,
+        "success_rate": 100.0,
+        "errors": 0
+      },
+      "optimized": {
+        "test_name": "db_session_optimized",
+        "iterations": 3,
+        "avg_duration_ms": 2.24,
+        "min_duration_ms": 1.93,
+        "max_duration_ms": 2.65,
+        "std_dev_ms": 0.37,
+        "total_cost_usd": 0.0,
+        "success_rate": 100.0,
+        "errors": 0
+      }
+    },
+    "parallel_execution": {
+      "baseline": {
+        "test_name": "sequential_execution",
+        "iterations": 3,
+        "avg_duration_ms": 265.08,
+        "min_duration_ms": 257.64,
+        "max_duration_ms": 271.67,
+        "std_dev_ms": 7.06,
+        "total_cost_usd": 0.015,
+        "success_rate": 100.0,
+        "errors": 0
+      },
+      "optimized": {
+        "test_name": "parallel_execution",
+        "iterations": 3,
+        "avg_duration_ms": 67.75,
+        "min_duration_ms": 50.97,
+        "max_duration_ms": 96.67,
+        "std_dev_ms": 25.16,
+        "total_cost_usd": 0.015,
+        "success_rate": 100.0,
+        "errors": 0
+      }
+    },
+    "lieutenant_lookup": {
+      "baseline": {
+        "test_name": "lt_lookup_baseline",
+        "iterations": 3,
+        "avg_duration_ms": 262.62,
+        "min_duration_ms": 39.33,
+        "max_duration_ms": 675.68,
+        "std_dev_ms": 358.11,
+        "total_cost_usd": 0.06,
+        "success_rate": 100.0,
+        "errors": 0
+      },
+      "optimized": {
+        "test_name": "lt_lookup_optimized",
+        "iterations": 3,
+        "avg_duration_ms": 9.44,
+        "min_duration_ms": 8.48,
+        "max_duration_ms": 11.13,
+        "std_dev_ms": 1.47,
+        "total_cost_usd": 0.006,
+        "success_rate": 100.0,
+        "errors": 0
+      }
+    },
+    "error_handling": {
+      "baseline": {
+        "test_name": "error_baseline",
+        "iterations": 3,
+        "avg_duration_ms": 0.0,
+        "min_duration_ms": 0.0,
+        "max_duration_ms": 0.01,
+        "std_dev_ms": 0.0,
+        "total_cost_usd": 8,
+        "success_rate": 100.0,
+        "errors": 0
+      },
+      "optimized": {
+        "test_name": "error_optimized",
+        "iterations": 3,
+        "avg_duration_ms": 0.0,
+        "min_duration_ms": 0.0,
+        "max_duration_ms": 0.0,
+        "std_dev_ms": 0.0,
+        "total_cost_usd": 44,
+        "success_rate": 100.0,
+        "errors": 0
+      }
+    },
+    "memory_context": {
+      "baseline": {
+        "test_name": "memory_baseline",
+        "iterations": 3,
+        "avg_duration_ms": 8.73,
+        "min_duration_ms": 8.07,
+        "max_duration_ms": 9.16,
+        "std_dev_ms": 0.58,
+        "total_cost_usd": 0.0,
+        "success_rate": 100.0,
+        "errors": 0
+      },
+      "optimized": {
+        "test_name": "memory_optimized",
+        "iterations": 3,
+        "avg_duration_ms": 10.61,
+        "min_duration_ms": 6.44,
+        "max_duration_ms": 15.62,
+        "std_dev_ms": 4.65,
+        "total_cost_usd": 0.0,
+        "success_rate": 100.0,
+        "errors": 0
+      }
+    }
+  },
+  "comparisons": [
+    {
+      "test_name": "DB Session (N+1 Fix)",
+      "baseline_avg_ms": 22.99,
+      "optimized_avg_ms": 2.24,
+      "improvement_percent": 90.3,
+      "baseline_cost_usd": 0.0,
+      "optimized_cost_usd": 0.0,
+      "cost_savings_percent": 0
+    },
+    {
+      "test_name": "Parallel Task Execution",
+      "baseline_avg_ms": 265.08,
+      "optimized_avg_ms": 67.75,
+      "improvement_percent": 74.4,
+      "baseline_cost_usd": 0.015,
+      "optimized_cost_usd": 0.015,
+      "cost_savings_percent": 0.0
+    },
+    {
+      "test_name": "Lieutenant Lookup Caching",
+      "baseline_avg_ms": 262.62,
+      "optimized_avg_ms": 9.44,
+      "improvement_percent": 96.4,
+      "baseline_cost_usd": 0.06,
+      "optimized_cost_usd": 0.006,
+      "cost_savings_percent": 90.0
+    },
+    {
+      "test_name": "Error Handling Resilience",
+      "baseline_avg_ms": 0.0,
+      "optimized_avg_ms": 0.0,
+      "improvement_percent": 0,
+      "baseline_tasks_completed": 3,
+      "optimized_tasks_completed": 15,
+      "resilience_improvement": "15/20 vs 3/20"
+    },
+    {
+      "test_name": "Memory Context Building",
+      "baseline_avg_ms": 8.73,
+      "optimized_avg_ms": 10.61,
+      "improvement_percent": -21.5,
+      "baseline_cost_usd": 0.0,
+      "optimized_cost_usd": 0.0,
+      "cost_savings_percent": 0
+    }
+  ]
+}
