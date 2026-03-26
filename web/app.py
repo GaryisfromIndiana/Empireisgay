@@ -56,6 +56,7 @@ def create_app(config: dict | None = None) -> Flask:
     from web.routes.scheduler import scheduler_bp
     from web.routes.budget import budget_bp
     from web.routes.replication import replication_bp
+    from web.routes.god_panel import god_panel_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(lieutenants_bp, url_prefix="/lieutenants")
@@ -69,6 +70,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(scheduler_bp, url_prefix="/scheduler")
     app.register_blueprint(budget_bp, url_prefix="/budget")
     app.register_blueprint(replication_bp, url_prefix="/network")
+    app.register_blueprint(god_panel_bp, url_prefix="/god")
 
     # ── Authentication ──────────────────────────────────────────────
     from web.middleware.auth import require_login, require_api_auth, _is_auth_enabled, _check_password, _get_auth_config

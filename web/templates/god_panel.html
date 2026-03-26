@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}God Panel — {{ empire_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1 style="color: var(--amber); font-size: 1.8rem;">GOD PANEL</h1>
+    <p>One command. Empire handles the rest.</p>
+</div>
+
+<!-- ── Command Input ─────────────────────────────────────────────── -->
+<div class="card" style="border-color: var(--amber); margin-bottom: 1.5rem;">
+    <div style="display: flex; gap: 0.75rem;">
+        <input type="text" id="god-command" placeholder="Research the latest breakthroughs in AI agents..."
+            style="flex: 1; padding: 0.8rem 1rem; background: var(--bg); border: 1px solid var(--border-glow);
+                   border-radius: 8px; color: var(--text); font-size: 1rem; font-family: inherit;"
+            onkeypress="if(event.key==='Enter') executeCommand()">
+        <button onclick="executeCommand()"
+            style="padding: 0.8rem 1.5rem; background: var(--amber); color: #0b0f19; border: none;
+                   border-radius: 8px; font-weight: 700; font-size: 0.9rem; cursor: pointer; white-space: nowrap;">
+            Execute
+        </button>
+    </div>
+    <div id="command-status" style="margin-top: 0.75rem; display: none;">
+        <div id="command-loading" style="color: var(--amber); font-size: 0.85rem;">
+            Processing command...
+        </div>
+        <div id="command-result" style="display: none; margin-top: 0.5rem; padding: 0.75rem;
+             background: var(--bg); border-radius: 6px; font-size: 0.85rem; max-height: 400px; overflow-y: auto;">
+        </div>
+    </div>
+</div>
+
+<!-- ── Network Overview ──────────────────────────────────────────── -->
+<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card stat">
+        <div class="stat-value text-green">{{ knowledge.entities }}</div>
+        <div class="stat-label">Knowledge Entities</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value">{{ knowledge.relations }}</div>
+        <div class="stat-label">Relations</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value">{{ memory.total }}</div>
+        <div class="stat-label">Memories</div>
+    </div>
+    <div class="card stat">
+        <div class="stat-value mono">${{ "%.2f"|format(budget.daily) }}</div>
+        <div class="stat-label">Today's Spend</div>
+    </div>
+</div>
+
+<!-- ── Empire Network + Fleet ────────────────────────────────────── -->
+<div class="grid grid-2" style="margin-bottom: 1rem;">
+    <!-- Fleet -->
+    <div class="card">
+        <h2>Lieutenant Fleet
+            {% if scheduler.running %}
+            <span class="badge badge-green" style="font-size: 0.6rem; margin-left: 0.5rem;">AUTONOMOUS</span>
+            {% endif %}
+        </h2>
+        <div style="margin-top: 0.75rem;">
+        {% for lt in fleet %}
+        <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
+            <div style="width: 130px; font-weight: 500; font-size: 0.85rem;">{{ lt.name[:16] }}</div>
+            <span class="badge badge-purple" style="font-size: 0.6rem; width: 65px; text-align: center;">{{ lt.domain }}</span>
+            <div style="flex: 1;">
+                <div class="progress-bar" style="height: 6px;">
+                    <div class="progress-bar-fill" style="width: {{ (lt.performance * 100)|int }}%; background: {% if lt.performance >= 0.8 %}var(--green){% elif lt.performance >= 0.6 %}var(--amber){% else %}var(--rose){% endif %};"></div>
+                </div>
+            </div>
+            <span class="mono text-muted" style="font-size: 0.72rem; width: 40px;">{{ "%.0f"|format(lt.performance * 100) }}%</span>
+            <span class="mono" style="font-size: 0.72rem; width: 30px;">{{ lt.tasks }}</span>
+        </div>
+        {% endfor %}
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card">
+        <h2>Quick Actions</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem;">
+            <button onclick="quickCommand('Run an intelligence sweep across all AI sources')"
+                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
+                Intelligence Sweep
+            </button>
+            <button onclick="quickCommand('Trigger an evolution cycle to propose self-improvements')"
+                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
+                Evolution Cycle
+            </button>
+            <button onclick="quickCommand('Audit the knowledge graph for contaminated entities')"
+                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
+                Knowledge Audit
+            </button>
+            <button onclick="quickCommand('Generate a research digest of this weeks findings')"
+                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
+                Weekly Digest
+            </button>
+            <button onclick="quickCommand('Report full system health status')"
+                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
+                System Status
+            </button>
+            <button onclick="quickCommand('Debate: What is the most important AI development this month?')"
+                class="btn" style="padding: 0.6rem; font-size: 0.8rem; text-align: left;">
+                War Room Debate
+            </button>
+        </div>
+
+        <h3 style="margin-top: 1.25rem;">Scheduler</h3>
+        <div style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.5rem;">
+            {% if scheduler.running %}
+            <span class="badge badge-green">Running</span>
+            {{ scheduler.ticks }} ticks · {{ scheduler.jobs }} jobs · {{ scheduler.errors }} errors
+            {% else %}
+            <span class="badge badge-rose">Stopped</span>
+            <button onclick="fetch('/scheduler/start',{method:'POST'}).then(()=>location.reload())"
+                class="btn" style="font-size: 0.7rem; padding: 0.2rem 0.5rem; margin-left: 0.5rem;">Start</button>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ── Active Directives ─────────────────────────────────────────── -->
+{% if directives.active %}
+<div class="card" style="margin-bottom: 1rem;">
+    <h2>Active Directives</h2>
+    {% for d in directives.active %}
+    <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
+        <span class="badge badge-blue" style="font-size: 0.6rem;">{{ d.status }}</span>
+        <a href="/directives/{{ d.id }}" style="font-size: 0.85rem;">{{ d.title[:60] }}</a>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- ── Recent Completed ──────────────────────────────────────────── -->
+{% if directives.recent %}
+<div class="card" style="margin-bottom: 1rem;">
+    <h2>Recent Completed</h2>
+    <table>
+        <thead><tr><th>Directive</th><th>Quality</th><th>Cost</th></tr></thead>
+        <tbody>
+        {% for d in directives.recent[:5] %}
+        <tr>
+            <td><a href="/directives/{{ d.id }}">{{ d.title[:50] }}</a></td>
+            <td>{{ "%.0f"|format((d.quality or 0) * 100) }}%</td>
+            <td class="mono">${{ "%.4f"|format(d.cost or 0) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ── Empire Network ────────────────────────────────────────────── -->
+{% if empires|length > 1 %}
+<div class="card">
+    <h2>Empire Network</h2>
+    <table>
+        <thead><tr><th>Empire</th><th>Domain</th><th>Status</th><th>Tasks</th><th>Knowledge</th><th>Cost</th></tr></thead>
+        <tbody>
+        {% for e in empires %}
+        <tr>
+            <td style="font-weight: 600;">{{ e.name }}</td>
+            <td><span class="badge badge-purple" style="font-size: 0.6rem;">{{ e.domain }}</span></td>
+            <td><span class="badge {% if e.status == 'active' %}badge-green{% else %}badge-amber{% endif %}" style="font-size: 0.6rem;">{{ e.status }}</span></td>
+            <td>{{ e.tasks }}</td>
+            <td>{{ e.knowledge }}</td>
+            <td class="mono">${{ "%.2f"|format(e.cost) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function executeCommand() {
+    const input = document.getElementById('god-command');
+    const command = input.value.trim();
+    if (!command) return;
+
+    const statusDiv = document.getElementById('command-status');
+    const loadingDiv = document.getElementById('command-loading');
+    const resultDiv = document.getElementById('command-result');
+
+    statusDiv.style.display = 'block';
+    loadingDiv.style.display = 'block';
+    loadingDiv.textContent = 'Processing: "' + command + '"...';
+    resultDiv.style.display = 'none';
+
+    fetch('/god/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({command: command})
+    })
+    .then(r => r.json())
+    .then(data => {
+        loadingDiv.style.display = 'none';
+        resultDiv.style.display = 'block';
+
+        let html = '<div style="margin-bottom: 0.5rem;">';
+        html += '<span class="badge badge-blue" style="font-size: 0.7rem;">' + (data.action || '?') + '</span> ';
+        html += '<span class="badge ' + (data.status === 'completed' ? 'badge-green' : 'badge-amber') + '" style="font-size: 0.7rem;">' + (data.status || '?') + '</span>';
+        if (data.cost) html += ' <span class="mono text-muted" style="font-size: 0.72rem;">$' + data.cost.toFixed(4) + '</span>';
+        html += '</div>';
+
+        if (data.synthesis) {
+            html += '<div style="white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5;">' + data.synthesis + '</div>';
+        } else if (data.directive_id) {
+            html += '<p>Directive <a href="/directives/' + data.directive_id + '">' + data.directive_id.slice(0,8) + '...</a> ' + (data.message || 'created') + '</p>';
+        } else if (data.health) {
+            html += '<p>Health: <strong>' + data.health.overall_status + '</strong></p>';
+            (data.health.checks || []).forEach(c => {
+                html += '<div style="font-size: 0.78rem; padding: 0.15rem 0;">' + c.name + ': ' + c.status + ' — ' + c.message + '</div>';
+            });
+        } else if (data.audit) {
+            html += '<p>Audited: ' + data.audit.audited + ', Flagged: ' + data.audit.flagged + ', Purged: ' + data.audit.purged + '</p>';
+        } else if (data.research) {
+            html += '<p>Sources: ' + (data.research.sources || 0) + '</p>';
+        } else if (data.error) {
+            html += '<p style="color: var(--rose);">Error: ' + data.error + '</p>';
+        } else {
+            html += '<pre style="font-size: 0.75rem;">' + JSON.stringify(data, null, 2) + '</pre>';
+        }
+
+        resultDiv.innerHTML = html;
+        input.value = '';
+    })
+    .catch(err => {
+        loadingDiv.style.display = 'none';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<p style="color: var(--rose);">Error: ' + err.message + '</p>';
+    });
+}
+
+function quickCommand(cmd) {
+    document.getElementById('god-command').value = cmd;
+    executeCommand();
+}
+</script>
+{% endblock %}
