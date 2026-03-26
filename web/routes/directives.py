@@ -53,18 +53,21 @@ def directive_detail(directive_id: str):
         from db.engine import get_session
         from db.repositories.directive import DirectiveRepository
         session = get_session()
-        dir_repo = DirectiveRepository(session)
-        timeline = dir_repo.get_timeline(directive_id)
-        tasks_by_wave = dir_repo.get_with_tasks(directive_id)
+        try:
+            dir_repo = DirectiveRepository(session)
+            timeline = dir_repo.get_timeline(directive_id)
+            tasks_by_wave = dir_repo.get_with_tasks(directive_id)
 
-        return render_template(
-            "directives/detail.html",
-            directive=directive,
-            progress=progress.__dict__,
-            cost=cost.__dict__,
-            timeline=timeline,
-            tasks_by_wave=tasks_by_wave.get("tasks_by_wave", {}),
-        )
+            return render_template(
+                "directives/detail.html",
+                directive=directive,
+                progress=progress.__dict__,
+                cost=cost.__dict__,
+                timeline=timeline,
+                tasks_by_wave=tasks_by_wave.get("tasks_by_wave", {}),
+            )
+        finally:
+            session.close()
     except Exception as e:
         return str(e), 500
 

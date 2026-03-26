@@ -50,9 +50,12 @@ def daily_spend():
         from db.engine import get_session
         from db.repositories.empire import EmpireRepository
         session = get_session()
-        repo = EmpireRepository(session)
-        daily = repo.get_daily_spend(empire_id, days=30)
-        return jsonify(daily)
+        try:
+            repo = EmpireRepository(session)
+            daily = repo.get_daily_spend(empire_id, days=30)
+            return jsonify(daily)
+        finally:
+            session.close()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

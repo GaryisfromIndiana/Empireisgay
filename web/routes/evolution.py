@@ -32,14 +32,17 @@ def list_proposals():
         from db.engine import get_session
         from db.repositories.evolution import EvolutionRepository
         session = get_session()
-        repo = EvolutionRepository(session)
-        proposals = repo.get_by_empire(empire_id, status=status_filter)
-        return render_template("evolution/proposals.html", proposals=[
-            {"id": p.id, "title": p.title, "type": p.proposal_type, "status": p.review_status,
-             "confidence": p.confidence_score, "lieutenant_id": p.lieutenant_id,
-             "created_at": p.created_at.isoformat() if p.created_at else None}
-            for p in proposals
-        ])
+        try:
+            repo = EvolutionRepository(session)
+            proposals = repo.get_by_empire(empire_id, status=status_filter)
+            return render_template("evolution/proposals.html", proposals=[
+                {"id": p.id, "title": p.title, "type": p.proposal_type, "status": p.review_status,
+                 "confidence": p.confidence_score, "lieutenant_id": p.lieutenant_id,
+                 "created_at": p.created_at.isoformat() if p.created_at else None}
+                for p in proposals
+            ])
+        finally:
+            session.close()
     except Exception as e:
         return render_template("evolution/proposals.html", proposals=[], error=str(e))
 
@@ -81,8 +84,11 @@ def evolution_trend():
         from db.engine import get_session
         from db.repositories.evolution import EvolutionRepository
         session = get_session()
-        repo = EvolutionRepository(session)
-        trend = repo.get_improvement_trend(empire_id)
-        return jsonify(trend)
+        try:
+            repo = EvolutionRepository(session)
+            trend = repo.get_improvement_trend(empire_id)
+            return jsonify(trend)
+        finally:
+            session.close()
     except Exception as e:
         return jsonify({"error": str(e)}), 500

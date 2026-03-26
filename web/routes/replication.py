@@ -16,14 +16,17 @@ def network_overview():
         from db.engine import get_session
         from db.repositories.empire import EmpireRepository
         session = get_session()
-        repo = EmpireRepository(session)
-        network = repo.get_network_stats()
-        capability_map = repo.get_capability_map()
+        try:
+            repo = EmpireRepository(session)
+            network = repo.get_network_stats()
+            capability_map = repo.get_capability_map()
 
-        return render_template("replication/network.html",
-            network=network,
-            capability_map=capability_map,
-        )
+            return render_template("replication/network.html",
+                network=network,
+                capability_map=capability_map,
+            )
+        finally:
+            session.close()
     except Exception as e:
         return render_template("replication/network.html", network={}, capability_map={}, error=str(e))
 
@@ -35,13 +38,16 @@ def list_empires():
         from db.engine import get_session
         from db.repositories.empire import EmpireRepository
         session = get_session()
-        repo = EmpireRepository(session)
-        empires = repo.get_active()
-        return jsonify([
-            {"id": e.id, "name": e.name, "domain": e.domain, "status": e.status,
-             "tasks": e.total_tasks_completed, "cost": e.total_cost_usd, "knowledge": e.total_knowledge_entries}
-            for e in empires
-        ])
+        try:
+            repo = EmpireRepository(session)
+            empires = repo.get_active()
+            return jsonify([
+                {"id": e.id, "name": e.name, "domain": e.domain, "status": e.status,
+                 "tasks": e.total_tasks_completed, "cost": e.total_cost_usd, "knowledge": e.total_knowledge_entries}
+                for e in empires
+            ])
+        finally:
+            session.close()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

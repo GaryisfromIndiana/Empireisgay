@@ -18,13 +18,16 @@ def list_warrooms():
         from db.models import WarRoom
         from sqlalchemy import select, desc
         session = get_session()
-        stmt = select(WarRoom).where(WarRoom.empire_id == empire_id).order_by(desc(WarRoom.created_at)).limit(20)
-        warrooms = list(session.execute(stmt).scalars().all())
-        return render_template("warrooms/list.html", warrooms=[
-            {"id": w.id, "status": w.status, "type": w.session_type, "participants": len(w.participants_json or []),
-             "cost": w.total_cost_usd, "created_at": w.created_at.isoformat() if w.created_at else None}
-            for w in warrooms
-        ])
+        try:
+            stmt = select(WarRoom).where(WarRoom.empire_id == empire_id).order_by(desc(WarRoom.created_at)).limit(20)
+            warrooms = list(session.execute(stmt).scalars().all())
+            return render_template("warrooms/list.html", warrooms=[
+                {"id": w.id, "status": w.status, "type": w.session_type, "participants": len(w.participants_json or []),
+                 "cost": w.total_cost_usd, "created_at": w.created_at.isoformat() if w.created_at else None}
+                for w in warrooms
+            ])
+        finally:
+            session.close()
     except Exception as e:
         return render_template("warrooms/list.html", warrooms=[], error=str(e))
 
@@ -36,15 +39,18 @@ def warroom_detail(session_id: str):
         from db.engine import get_session
         from db.models import WarRoom
         session = get_session()
-        warroom = session.get(WarRoom, session_id)
-        if not warroom:
-            return "War room not found", 404
-        return render_template("warrooms/detail.html", warroom={
-            "id": warroom.id, "status": warroom.status, "type": warroom.session_type,
-            "participants": warroom.participants_json, "synthesis": warroom.synthesis_json,
-            "action_items": warroom.action_items_json, "transcript": warroom.transcript_json,
-            "cost": warroom.total_cost_usd,
-        })
+        try:
+            warroom = session.get(WarRoom, session_id)
+            if not warroom:
+                return "War room not found", 404
+            return render_template("warrooms/detail.html", warroom={
+                "id": warroom.id, "status": warroom.status, "type": warroom.session_type,
+                "participants": warroom.participants_json, "synthesis": warroom.synthesis_json,
+                "action_items": warroom.action_items_json, "transcript": warroom.transcript_json,
+                "cost": warroom.total_cost_usd,
+            })
+        finally:
+            session.close()
     except Exception as e:
         return str(e), 500
 

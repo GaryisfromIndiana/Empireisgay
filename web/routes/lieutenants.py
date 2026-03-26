@@ -47,29 +47,32 @@ def lieutenant_detail(lieutenant_id: str):
         from db.repositories.lieutenant import LieutenantRepository
 
         session = get_session()
-        repo = LieutenantRepository(session)
+        try:
+            repo = LieutenantRepository(session)
 
-        lt = repo.get(lieutenant_id)
-        if not lt:
-            return "Lieutenant not found", 404
+            lt = repo.get(lieutenant_id)
+            if not lt:
+                return "Lieutenant not found", 404
 
-        task_stats = repo.get_task_stats(lieutenant_id)
-        cost_breakdown = repo.get_cost_breakdown(lieutenant_id)
+            task_stats = repo.get_task_stats(lieutenant_id)
+            cost_breakdown = repo.get_cost_breakdown(lieutenant_id)
 
-        return render_template(
-            "lieutenants/detail.html",
-            lieutenant={
-                "id": lt.id, "name": lt.name, "domain": lt.domain,
-                "status": lt.status, "performance": lt.performance_score,
-                "tasks_completed": lt.tasks_completed, "tasks_failed": lt.tasks_failed,
-                "total_cost": lt.total_cost_usd, "avg_quality": lt.avg_quality_score,
-                "persona": lt.persona_json,
-                "specializations": lt.specializations_json,
-                "last_active": lt.last_active_at.isoformat() if lt.last_active_at else None,
-            },
-            task_stats=task_stats,
-            cost_breakdown=cost_breakdown,
-        )
+            return render_template(
+                "lieutenants/detail.html",
+                lieutenant={
+                    "id": lt.id, "name": lt.name, "domain": lt.domain,
+                    "status": lt.status, "performance": lt.performance_score,
+                    "tasks_completed": lt.tasks_completed, "tasks_failed": lt.tasks_failed,
+                    "total_cost": lt.total_cost_usd, "avg_quality": lt.avg_quality_score,
+                    "persona": lt.persona_json,
+                    "specializations": lt.specializations_json,
+                    "last_active": lt.last_active_at.isoformat() if lt.last_active_at else None,
+                },
+                task_stats=task_stats,
+                cost_breakdown=cost_breakdown,
+            )
+        finally:
+            session.close()
     except Exception as e:
         logger.error("Lieutenant detail error: %s", e)
         return str(e), 500

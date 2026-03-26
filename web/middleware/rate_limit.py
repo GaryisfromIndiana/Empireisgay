@@ -103,19 +103,24 @@ def rate_limit(
             ...
     """
     def decorator(f: Callable):
+        # Use the global singleton — override its config temporarily for the check
         @wraps(f)
         def decorated_function(*args, **kwargs):
             limiter = get_rate_limiter()
 
-            if requests_per_minute or requests_per_hour:
-                custom_config = RateLimitConfig(
-                    requests_per_minute=requests_per_minute or limiter.config.requests_per_minute,
-                    requests_per_hour=requests_per_hour or limiter.config.requests_per_hour,
-                )
-                custom_limiter = RateLimiter(custom_config)
-                allowed, info = custom_limiter.check_rate_limit()
-            else:
-                allowed, info = limiter.check_rate_limit()
+            # Temporarily adjust limits if custom values provided
+            orig_rpm = limiter.config.requests_per_minute
+            orig_rph = limiter.config.requests_per_hour
+            if requests_per_minute:
+                limiter.config.requests_per_minute = requests_per_minute
+            if requests_per_hour:
+                limiter.config.requests_per_hour = requests_per_hour
+
+            allowed, info = limiter.check_rate_limit()
+
+            # Restore original config
+            limiter.config.requests_per_minute = orig_rpm
+            limiter.config.requests_per_hour = orig_rph
 
             if not allowed:
                 retry_after = info.get("retry_after", 60)

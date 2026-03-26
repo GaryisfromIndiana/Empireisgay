@@ -8,6 +8,13 @@ def seed():
     engine = get_engine()
 
     with session_scope(engine) as session:
+        # Check if already seeded
+        from sqlalchemy import select
+        existing = session.execute(select(Empire).where(Empire.id == "empire-alpha")).scalar_one_or_none()
+        if existing:
+            print("Empire already seeded — skipping")
+            return
+
         # ── Empire ─────────────────────────────────────────────────────
         empire = Empire(
             id="empire-alpha",

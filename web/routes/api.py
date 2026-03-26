@@ -11,6 +11,14 @@ logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
 
 
+def _get_json_or_400():
+    """Get JSON body or return 400 error."""
+    data = request.get_json()
+    if data is None:
+        return None
+    return data
+
+
 # ── Empire ─────────────────────────────────────────────────────────────
 
 @api_bp.route("/empire")
@@ -21,9 +29,12 @@ def get_empire():
         from db.engine import get_session
         from db.repositories.empire import EmpireRepository
         session = get_session()
-        repo = EmpireRepository(session)
-        health = repo.get_health_overview(empire_id)
-        return jsonify(health)
+        try:
+            repo = EmpireRepository(session)
+            health = repo.get_health_overview(empire_id)
+            return jsonify(health)
+        finally:
+            session.close()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -35,8 +46,11 @@ def get_network():
         from db.engine import get_session
         from db.repositories.empire import EmpireRepository
         session = get_session()
-        repo = EmpireRepository(session)
-        return jsonify(repo.get_network_stats())
+        try:
+            repo = EmpireRepository(session)
+            return jsonify(repo.get_network_stats())
+        finally:
+            session.close()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -156,58 +170,61 @@ def api_directive_report(directive_id: str):
         from db.repositories.task import TaskRepository
 
         session = get_session()
-        dir_repo = DirectiveRepository(session)
-        task_repo = TaskRepository(session)
+        try:
+            dir_repo = DirectiveRepository(session)
+            task_repo = TaskRepository(session)
 
-        directive = dir_repo.get(directive_id)
-        if not directive:
-            return jsonify({"error": "Directive not found"}), 404
+            directive = dir_repo.get(directive_id)
+            if not directive:
+                return jsonify({"error": "Directive not found"}), 404
 
-        # Get all tasks with their output
-        tasks = task_repo.get_by_directive(directive_id)
+            # Get all tasks with their output
+            tasks = task_repo.get_by_directive(directive_id)
 
-        # Build report
-        report_sections = []
-        for task in tasks:
-            output = task.output_json or {}
-            content = output.get("content", "")
-            if content:
-                report_sections.append({
-                    "title": task.title,
-                    "wave": task.wave_number,
-                    "lieutenant": task.lieutenant_id,
-                    "status": task.status,
-                    "quality_score": task.quality_score,
-                    "cost_usd": task.cost_usd,
-                    "content": content,
-                })
+            # Build report
+            report_sections = []
+            for task in tasks:
+                output = task.output_json or {}
+                content = output.get("content", "")
+                if content:
+                    report_sections.append({
+                        "title": task.title,
+                        "wave": task.wave_number,
+                        "lieutenant": task.lieutenant_id,
+                        "status": task.status,
+                        "quality_score": task.quality_score,
+                        "cost_usd": task.cost_usd,
+                        "content": content,
+                    })
 
-        # Get war room synthesis
-        from db.models import WarRoom
-        from sqlalchemy import select, desc
-        war_rooms = list(session.execute(
-            select(WarRoom).where(WarRoom.directive_id == directive_id).order_by(desc(WarRoom.created_at))
-        ).scalars().all())
+            # Get war room synthesis
+            from db.models import WarRoom
+            from sqlalchemy import select, desc
+            war_rooms = list(session.execute(
+                select(WarRoom).where(WarRoom.directive_id == directive_id).order_by(desc(WarRoom.created_at))
+            ).scalars().all())
 
-        synthesis = {}
-        if war_rooms:
-            synthesis = war_rooms[0].synthesis_json or {}
+            synthesis = {}
+            if war_rooms:
+                synthesis = war_rooms[0].synthesis_json or {}
 
-        return jsonify({
-            "directive": {
-                "id": directive.id,
-                "title": directive.title,
-                "description": directive.description,
-                "status": directive.status,
-                "total_cost": directive.total_cost_usd,
-                "quality_score": directive.quality_score,
-                "created_at": directive.created_at.isoformat() if directive.created_at else None,
-                "completed_at": directive.completed_at.isoformat() if directive.completed_at else None,
-            },
-            "sections": report_sections,
-            "total_sections": len(report_sections),
-            "war_room_synthesis": synthesis,
-        })
+            return jsonify({
+                "directive": {
+                    "id": directive.id,
+                    "title": directive.title,
+                    "description": directive.description,
+                    "status": directive.status,
+                    "total_cost": directive.total_cost_usd,
+                    "quality_score": directive.quality_score,
+                    "created_at": directive.created_at.isoformat() if directive.created_at else None,
+                    "completed_at": directive.completed_at.isoformat() if directive.completed_at else None,
+                },
+                "sections": report_sections,
+                "total_sections": len(report_sections),
+                "war_room_synthesis": synthesis,
+            })
+        finally:
+            session.close()
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -221,21 +238,24 @@ def api_latest_reports():
         from db.engine import get_session
         from db.repositories.directive import DirectiveRepository
         session = get_session()
-        repo = DirectiveRepository(session)
-        completed = repo.get_completed(empire_id, days=30, limit=10)
+        try:
+            repo = DirectiveRepository(session)
+            completed = repo.get_completed(empire_id, days=30, limit=10)
 
-        reports = []
-        for d in completed:
-            reports.append({
-                "id": d.id,
-                "title": d.title,
-                "status": d.status,
-                "quality_score": d.quality_score,
-                "total_cost": d.total_cost_usd,
-                "created_at": d.created_at.isoformat() if d.created_at else None,
-                "completed_at": d.completed_at.isoformat() if d.completed_at else None,
-                "report_url": f"/api/directives/{d.id}/report",
-            })
+            reports = []
+            for d in completed:
+                reports.append({
+                    "id": d.id,
+                    "title": d.title,
+                    "status": d.status,
+                    "quality_score": d.quality_score,
+                    "total_cost": d.total_cost_usd,
+                    "created_at": d.created_at.isoformat() if d.created_at else None,
+                    "completed_at": d.completed_at.isoformat() if d.completed_at else None,
+                    "report_url": f"/api/directives/{d.id}/report",
+                })
+        finally:
+            session.close()
 
         # Also include recent research from memory
         from core.memory.manager import MemoryManager
