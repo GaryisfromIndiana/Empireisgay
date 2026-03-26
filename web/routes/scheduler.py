@@ -72,6 +72,22 @@ def resume_job(job_name: str):
     return jsonify({"success": success})
 
 
+@scheduler_bp.route("/start", methods=["POST"])
+def start_scheduler():
+    """Start the scheduler daemon."""
+    daemon = current_app.config.get("_SCHEDULER_DAEMON")
+    if daemon:
+        daemon.start()
+        return jsonify({"status": "started"})
+
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from core.scheduler.daemon import SchedulerDaemon
+    daemon = SchedulerDaemon(empire_id, tick_interval=300)
+    daemon.start()
+    current_app.config["_SCHEDULER_DAEMON"] = daemon
+    return jsonify({"status": "started"})
+
+
 @scheduler_bp.route("/tick", methods=["POST"])
 def manual_tick():
     """Execute a single scheduler tick."""

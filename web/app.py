@@ -88,21 +88,22 @@ def create_app(config: dict | None = None) -> Flask:
         logger.error("Server error: %s", e)
         return {"error": "Internal server error"}, 500
 
-    # Start scheduler daemon — auto-starts on Postgres, paused on SQLite
+    # Start scheduler daemon — auto-starts on Postgres
     import os
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG"):
+    is_worker = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("DEBUG")
+    if is_worker:
         try:
             from core.scheduler.daemon import SchedulerDaemon
             empire_id = app.config.get("EMPIRE_ID", "")
             daemon = SchedulerDaemon(empire_id, tick_interval=300)  # 5 min ticks
             app.config["_SCHEDULER_DAEMON"] = daemon
 
-            is_postgres = "postgresql" in settings.db_url
-            if is_postgres:
+            # Auto-start on Postgres; manual on SQLite
+            if "postgresql" in settings.db_url:
                 daemon.start()
-                logger.info("Scheduler daemon STARTED (Postgres — 5 min ticks, 14 jobs)")
+                logger.info("Scheduler daemon STARTED (Postgres — 5 min ticks)")
             else:
-                logger.info("Scheduler daemon ready (SQLite — use /scheduler/tick manually)")
+                logger.info("Scheduler daemon ready (SQLite — use /scheduler/start)")
         except Exception as e:
             logger.warning("Could not create scheduler: %s", e)
 
