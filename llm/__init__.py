@@ -7,6 +7,7 @@ from llm.base import (
 from llm.anthropic import AnthropicClient
 from llm.openai import OpenAIClient
 from llm.router import ModelRouter, TaskMetadata, RoutingDecision
+from llm.cache import LLMCache, get_cache, cache_llm_response, get_cached_response
 from llm.schemas import (
     PlanningOutput, AnalysisOutput, CriticOutput,
     EntityExtractionOutput, DebateOutput, SynthesisOutput,
@@ -19,6 +20,7 @@ __all__ = [
     "StreamChunk", "ToolCall", "ToolDefinition", "RateLimiter",
     "AnthropicClient", "OpenAIClient", "ModelRouter",
     "TaskMetadata", "RoutingDecision",
+    "LLMCache", "get_cache", "cache_llm_response", "get_cached_response",
     "PlanningOutput", "AnalysisOutput", "CriticOutput",
     "EntityExtractionOutput", "DebateOutput", "SynthesisOutput",
     "ProposalOutput", "ReviewOutput", "ResearchOutput",

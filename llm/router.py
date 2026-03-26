@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from config.settings import get_settings, MODEL_CATALOG, LLMModelConfig
 from llm.base import LLMClient, LLMRequest, LLMResponse
+from llm.cache import get_cache, cache_llm_response
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,26 @@ class ModelRouter:
 
         decision = self.route(metadata)
 
+        # Check cache first
+        cache = get_cache()
+        prompt_text = request.messages[-1].content if request.messages else ""
+        cached = cache.get(
+            model=decision.model_key,
+            prompt=prompt_text,
+            system_prompt=request.system_prompt,
+        )
+        if cached:
+            logger.debug("Cache HIT for %s", decision.model_key)
+            return LLMResponse(
+                content=cached.content,
+                model=decision.model_config.model_id,
+                provider=decision.provider,
+                tokens_input=cached.tokens_input,
+                tokens_output=cached.tokens_output,
+                cost_usd=0.0,
+                latency_ms=0.0,
+            )
+
         # Override model in request
         request.model = decision.model_config.model_id
 
@@ -235,6 +256,18 @@ class ModelRouter:
 
             self._update_health(decision.model_key, success=True, latency_ms=latency)
             self._record_cost(response, decision.model_key, decision.provider)
+
+            # Cache the response
+            cache_llm_response(
+                model=decision.model_key,
+                prompt=prompt_text,
+                content=response.content,
+                system_prompt=request.system_prompt,
+                tokens_input=response.tokens_input,
+                tokens_output=response.tokens_output,
+                cost_usd=response.cost_usd,
+            )
+
             return response
 
         except Exception as e:
