@@ -29,7 +29,7 @@ def god_panel():
         try:
             # All empires in the network
             empire_repo = EmpireRepository(session)
-            empires = empire_repo.get_all()
+            empires = empire_repo.get_active()
             empire_list = [
                 {
                     "id": e.id,
@@ -313,7 +313,7 @@ def network_status():
         session = get_session()
         try:
             repo = EmpireRepository(session)
-            empires = repo.get_all()
+            empires = repo.get_active()
             return jsonify([
                 {
                     "id": e.id, "name": e.name, "domain": e.domain,
