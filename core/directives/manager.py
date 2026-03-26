@@ -227,8 +227,10 @@ class DirectiveManager:
             repo.commit()
 
             wave_task_results = []
+            # Execute all tasks in this wave, collect results
+            task_records = []
+
             for task_data in tasks:
-                assigned_lt = task_data.get("assigned_to", "")
                 lt = lt_manager.find_best_lieutenant(task_data.get("description", ""))
 
                 if not lt:
@@ -242,38 +244,56 @@ class DirectiveManager:
                     })
                     continue
 
-                from core.ace.engine import TaskInput
-                task = TaskInput(
-                    title=task_data.get("title", ""),
-                    description=task_data.get("description", ""),
-                )
-                result = lt.execute_task(task)
-                wave_task_results.append(result.to_dict())
-                total_cost += result.cost_usd
-
-                # Record task in DB (best-effort)
                 try:
-                    from db.models import Task as TaskModel
-                    from db.engine import session_scope
-                    with session_scope() as db_session:
-                        db_task = TaskModel(
-                            directive_id=directive_id,
-                            lieutenant_id=lt.id,
-                            title=task_data.get("title", "")[:256],
-                            description=task_data.get("description", "")[:5000],
-                            status="completed" if result.success else "failed",
-                            wave_number=wave_num,
-                            cost_usd=result.cost_usd,
-                            quality_score=result.quality_score,
-                            model_used=result.model_used,
-                            tokens_input=result.tokens_input,
-                            tokens_output=result.tokens_output,
-                            execution_time_seconds=result.execution_time_seconds,
-                            output_json={"content": result.content[:5000]},
-                        )
-                        db_session.add(db_task)
+                    from core.ace.engine import TaskInput
+                    task = TaskInput(
+                        title=task_data.get("title", ""),
+                        description=task_data.get("description", ""),
+                    )
+                    result = lt.execute_task(task)
+                    wave_task_results.append(result.to_dict())
+                    total_cost += result.cost_usd
+
+                    task_records.append({
+                        "lt_id": lt.id,
+                        "task_data": task_data,
+                        "result": result,
+                    })
                 except Exception as e:
-                    logger.warning("Failed to record task in DB: %s", e)
+                    logger.error("Task '%s' failed: %s", task_data.get("title", "?")[:50], e)
+                    wave_task_results.append({
+                        "title": task_data.get("title", ""),
+                        "success": False,
+                        "error": str(e),
+                        "quality_score": 0,
+                        "cost_usd": 0,
+                    })
+
+            # Batch insert all task records in ONE session per wave
+            try:
+                from db.models import Task as TaskModel
+                from db.engine import session_scope
+                with session_scope() as db_session:
+                    for item in task_records:
+                        r = item["result"]
+                        td = item["task_data"]
+                        db_session.add(TaskModel(
+                            directive_id=directive_id,
+                            lieutenant_id=item["lt_id"],
+                            title=td.get("title", "")[:256],
+                            description=td.get("description", "")[:5000],
+                            status="completed" if r.success else "failed",
+                            wave_number=wave_num,
+                            cost_usd=r.cost_usd,
+                            quality_score=r.quality_score,
+                            model_used=r.model_used,
+                            tokens_input=r.tokens_input,
+                            tokens_output=r.tokens_output,
+                            execution_time_seconds=r.execution_time_seconds,
+                            output_json={"content": r.content[:5000]},
+                        ))
+            except Exception as e:
+                logger.warning("Failed to batch-record tasks: %s", e)
 
             wave_results.append({
                 "wave_number": wave_num,
