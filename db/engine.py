@@ -78,10 +78,11 @@ def get_engine(db_url: str | None = None, echo: bool = False) -> Engine:
             engine = create_engine(
                 db_url,
                 echo=echo,
-                pool_size=10,
-                max_overflow=20,
+                pool_size=20,
+                max_overflow=40,
                 pool_pre_ping=True,
-                pool_recycle=3600,
+                pool_recycle=1800,
+                pool_timeout=30,
             )
 
         _engine = engine

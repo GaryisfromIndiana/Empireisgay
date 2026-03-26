@@ -647,12 +647,15 @@ class MemoryManager:
         }
 
         used_chars = 0
+        max_mem_chars = 300
         for mem in filtered:
             mtype = mem.get("type", "semantic")
             content = mem.get("content", "")
             title = mem.get("title", "")
 
-            entry = f"- {title}: {content[:300]}" if title else f"- {content[:300]}"
+            # Truncate individual memories to prevent any single one dominating
+            truncated = content[:max_mem_chars] + "..." if len(content) > max_mem_chars else content
+            entry = f"- {title}: {truncated}" if title else f"- {truncated}"
             entry_len = len(entry)
 
             if used_chars + entry_len > char_budget:
@@ -668,7 +671,17 @@ class MemoryManager:
             if entries:
                 parts.append(f"## {header}\n" + "\n".join(entries))
 
-        return "\n\n".join(parts) if parts else ""
+        context = "\n\n".join(parts) if parts else ""
+
+        # Final safety truncation if still over budget
+        if len(context) > char_budget:
+            logger.warning(
+                "Context window exceeded budget (%d > %d chars), truncating",
+                len(context), char_budget,
+            )
+            context = context[:char_budget] + "\n... [truncated to fit token budget]"
+
+        return context
 
     def get_memory_summary(self) -> str:
         """Get a human-readable summary of what Empire knows.

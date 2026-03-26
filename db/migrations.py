@@ -183,6 +183,28 @@ class MigrationRunner:
             sql_down="DROP TABLE IF EXISTS task_dependencies;",
         ))
 
+        self.register(MigrationVersion(
+            version=6,
+            name="add_performance_indexes_v2",
+            description="Additional performance indexes for hot query paths",
+            sql_up="""
+                CREATE INDEX IF NOT EXISTS ix_directives_completed_at ON directives(completed_at);
+                CREATE INDEX IF NOT EXISTS ix_tasks_quality_score ON tasks(quality_score);
+                CREATE INDEX IF NOT EXISTS ix_memory_effective_importance ON memory_entries(effective_importance);
+                CREATE INDEX IF NOT EXISTS ix_knowledge_entity_type ON knowledge_entities(entity_type, empire_id);
+                CREATE INDEX IF NOT EXISTS ix_budget_logs_created_at ON budget_logs(created_at);
+                CREATE INDEX IF NOT EXISTS ix_lieutenants_last_active ON lieutenants(last_active_at);
+            """,
+            sql_down="""
+                DROP INDEX IF EXISTS ix_directives_completed_at;
+                DROP INDEX IF EXISTS ix_tasks_quality_score;
+                DROP INDEX IF EXISTS ix_memory_effective_importance;
+                DROP INDEX IF EXISTS ix_knowledge_entity_type;
+                DROP INDEX IF EXISTS ix_budget_logs_created_at;
+                DROP INDEX IF EXISTS ix_lieutenants_last_active;
+            """,
+        ))
+
     def register(self, migration: MigrationVersion) -> None:
         """Register a migration version.
 

@@ -10,6 +10,7 @@ from typing import Any, Optional
 from config.settings import get_settings, MODEL_CATALOG, LLMModelConfig
 from llm.base import LLMClient, LLMRequest, LLMResponse
 from llm.cache import get_cache, cache_llm_response
+from utils.circuit_breaker import get_circuit, CircuitOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -248,12 +249,19 @@ class ModelRouter:
         request.model = decision.model_config.model_id
 
         client = self.get_client(decision.provider)
+        circuit = get_circuit(f"llm:{decision.provider}")
 
         try:
+            if not circuit.allow_request():
+                raise CircuitOpenError(
+                    f"Circuit for {decision.provider} is OPEN — skipping to fallback"
+                )
+
             start = time.time()
             response = client.complete(request)
             latency = (time.time() - start) * 1000
 
+            circuit.record_success()
             self._update_health(decision.model_key, success=True, latency_ms=latency)
             self._record_cost(response, decision.model_key, decision.provider)
 
@@ -270,7 +278,8 @@ class ModelRouter:
 
             return response
 
-        except Exception as e:
+        except (Exception, CircuitOpenError) as e:
+            circuit.record_failure(e if not isinstance(e, CircuitOpenError) else None)
             self._update_health(decision.model_key, success=False)
             logger.warning("Primary model %s failed: %s", decision.model_key, e)
 
