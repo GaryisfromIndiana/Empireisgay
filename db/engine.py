@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Any
@@ -36,11 +37,18 @@ def _record_session_close() -> None:
 
 
 class TrackedSession(Session):
-    """Session subclass that tracks open/close counts for debugging."""
+    """Session subclass that tracks open/close and auto-closes leaked sessions.
+
+    Safety net: if a session is not closed within MAX_SESSION_AGE_SECONDS,
+    it gets force-closed on the next operation to prevent pool exhaustion.
+    """
+
+    MAX_SESSION_AGE_SECONDS = 60  # Sessions older than this are leaked
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._close_recorded = False
+        self._created_at = time.monotonic()
         _record_session_open()
 
     def close(self) -> None:
@@ -48,6 +56,31 @@ class TrackedSession(Session):
             _record_session_close()
             self._close_recorded = True
         super().close()
+
+    def _check_age(self) -> None:
+        """Force-close if session has been open too long (leaked)."""
+        age = time.monotonic() - self._created_at
+        if age > self.MAX_SESSION_AGE_SECONDS and not self._close_recorded:
+            logger.warning(
+                "Force-closing leaked session (age=%.0fs). "
+                "This indicates a missing session.close() call.",
+                age,
+            )
+            self.close()
+
+    def execute(self, *args, **kwargs):
+        self._check_age()
+        return super().execute(*args, **kwargs)
+
+    def __del__(self):
+        """Last resort: close on garbage collection if still open."""
+        if not self._close_recorded:
+            try:
+                _record_session_close()
+                self._close_recorded = True
+                super().close()
+            except Exception:
+                pass
 
 
 def get_session_stats() -> dict[str, int]:
@@ -189,9 +222,40 @@ def get_session(engine: Engine | None = None) -> Session:
 
     Returns:
         New Session instance.
+
+    Note:
+        Callers MUST close the session when done (use try/finally or session_scope).
+        If a session is not closed within 60 seconds, TrackedSession will
+        force-close it as a safety net, but this indicates a bug.
     """
+    from sqlalchemy.exc import TimeoutError as SATimeoutError
+
     factory = get_session_factory(engine)
-    return factory()
+    try:
+        return factory()
+    except SATimeoutError:
+        # Pool exhausted — force-close any leaked sessions and retry once
+        logger.warning("Connection pool exhausted — forcing cleanup of leaked sessions")
+        _force_cleanup_leaked_sessions()
+        try:
+            return factory()
+        except SATimeoutError:
+            logger.error("Connection pool still exhausted after cleanup")
+            raise
+
+
+def _force_cleanup_leaked_sessions() -> None:
+    """Emergency cleanup: dispose all pool connections and reset.
+
+    This is a last resort when the pool is exhausted due to leaked sessions.
+    """
+    global _engine
+    if _engine is not None:
+        try:
+            _engine.pool.dispose()
+            logger.warning("Disposed connection pool to recover from exhaustion")
+        except Exception as e:
+            logger.error("Pool dispose failed: %s", e)
 
 
 @contextmanager

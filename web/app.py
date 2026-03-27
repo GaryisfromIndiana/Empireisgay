@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, jsonify, redirect, request, session
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,16 @@ def create_app(config: dict | None = None) -> Flask:
     with app.app_context():
         from db.engine import init_db
         init_db()
+
+    # Auto-close scoped sessions at end of each request to prevent leaks
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        from db.engine import get_scoped_session
+        try:
+            scoped = get_scoped_session()
+            scoped.remove()
+        except Exception:
+            pass
 
     # Register blueprints
     from web.routes.dashboard import dashboard_bp
@@ -124,6 +134,21 @@ def create_app(config: dict | None = None) -> Flask:
     @app.route("/ping")
     def ping():
         return "ok", 200
+
+    # DB pool status — for monitoring connection exhaustion
+    @app.route("/api/health/db")
+    def db_pool_status():
+        from db.engine import get_engine, get_session_stats
+        engine = get_engine()
+        pool = engine.pool
+        pool_info = {
+            "pool_size": pool.size() if hasattr(pool, "size") else "N/A",
+            "checked_in": pool.checkedin() if hasattr(pool, "checkedin") else "N/A",
+            "checked_out": pool.checkedout() if hasattr(pool, "checkedout") else "N/A",
+            "overflow": pool.overflow() if hasattr(pool, "overflow") else "N/A",
+        }
+        session_stats = get_session_stats()
+        return jsonify({"pool": pool_info, "sessions": session_stats})
 
     # Context processors
     @app.context_processor
