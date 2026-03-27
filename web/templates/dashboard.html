@@ -1,49 +1,58 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — {{ empire_name }}{% endblock %}
 {% block content %}
-<div class="page-header">
-    <h1>Dashboard</h1>
-    <p>
-        {% if scheduler %}
-        {% if scheduler.running %}
-            <span class="badge badge-green">Autonomous</span>
-            <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;">{{ scheduler.total_ticks }} ticks · {{ scheduler.total_jobs }} jobs · {{ scheduler.errors }} errors</span>
-        {% else %}
-            <span class="badge badge-amber">Manual Mode</span>
-        {% endif %}
-        {% endif %}
-    </p>
+<div class="page-header" style="display: flex; align-items: center; justify-content: space-between;">
+    <div>
+        <h1>Dashboard</h1>
+        <p>
+            <span id="scheduler-badge">
+            {% if scheduler %}
+            {% if scheduler.running %}
+                <span class="badge badge-green">Autonomous</span>
+                <span class="text-muted" style="font-size: 0.75rem; margin-left: 0.5rem;"><span id="sched-ticks">{{ scheduler.total_ticks }}</span> ticks · <span id="sched-jobs">{{ scheduler.total_jobs }}</span> jobs · <span id="sched-errors">{{ scheduler.errors }}</span> errors</span>
+            {% else %}
+                <span class="badge badge-amber">Manual Mode</span>
+            {% endif %}
+            {% endif %}
+            </span>
+        </p>
+    </div>
+    <div id="refresh-indicator" style="text-align: right; font-size: 0.72rem; color: var(--text-secondary);">
+        <div id="refresh-status" style="display: flex; align-items: center; gap: 0.4rem; justify-content: flex-end;">
+            <span id="refresh-dot" style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block;"></span>
+            <span>Live</span>
+        </div>
+        <div id="refresh-countdown" style="font-family: var(--mono); margin-top: 0.15rem;">30s</div>
+    </div>
 </div>
 
-{% if health %}
 <!-- ── Top Stats ──────────────────────────────────────────────────── -->
-<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+<div id="top-stats" class="grid grid-4" style="margin-bottom: 1.5rem;">
     <div class="card stat">
-        <div class="stat-value {% if health.get('health', {}).get('status') == 'healthy' %}text-green{% elif health.get('health', {}).get('status') == 'degraded' %}text-amber{% else %}text-rose{% endif %}">
-            {{ health.get('health', {}).get('status', '?')|upper }}
+        <div id="stat-health" class="stat-value {% if health and health.get('health', {}).get('status') == 'healthy' %}text-green{% elif health and health.get('health', {}).get('status') == 'degraded' %}text-amber{% else %}text-rose{% endif %}">
+            {{ health.get('health', {}).get('status', '?')|upper if health else '?' }}
         </div>
         <div class="stat-label">System Health</div>
     </div>
     <div class="card stat">
-        <div class="stat-value">{{ health.get('knowledge', {}).get('entities', 0) }}</div>
+        <div id="stat-entities" class="stat-value">{{ health.get('knowledge', {}).get('entities', 0) if health else 0 }}</div>
         <div class="stat-label">Knowledge Entities</div>
     </div>
     <div class="card stat">
-        <div class="stat-value">{{ health.get('memory', {}).get('entries', 0) }}</div>
+        <div id="stat-memories" class="stat-value">{{ health.get('memory', {}).get('entries', 0) if health else 0 }}</div>
         <div class="stat-label">Memories</div>
     </div>
     <div class="card stat">
-        <div class="stat-value mono">${{ "%.2f"|format(budget.daily_spend) }}</div>
+        <div id="stat-spend" class="stat-value mono">${{ "%.2f"|format(budget.daily_spend) }}</div>
         <div class="stat-label">Today's Spend</div>
     </div>
 </div>
-{% endif %}
 
 <!-- ── Fleet + Budget Row ─────────────────────────────────────────── -->
 <div class="grid grid-2" style="margin-bottom: 1rem;">
     <div class="card">
         <h2>Lieutenant Fleet</h2>
-        <div style="margin-top: 0.75rem;">
+        <div id="fleet-list" style="margin-top: 0.75rem;">
         {% if fleet_stats %}
             {% for lt in fleet_stats %}
             <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; border-bottom: 1px solid var(--border);">
@@ -64,27 +73,32 @@
 
     <div class="card">
         <h2>Budget</h2>
+        <div id="budget-section">
         {% if budget %}
         <div class="grid grid-2" style="margin: 0.75rem 0;">
             <div class="stat">
-                <div class="stat-value mono" style="font-size: 1.2rem;">${{ "%.2f"|format(budget.daily_spend) }}</div>
+                <div id="budget-daily" class="stat-value mono" style="font-size: 1.2rem;">${{ "%.2f"|format(budget.daily_spend) }}</div>
                 <div class="stat-label">Daily</div>
             </div>
             <div class="stat">
-                <div class="stat-value mono" style="font-size: 1.2rem;">${{ "%.2f"|format(budget.daily_remaining) }}</div>
+                <div id="budget-remaining" class="stat-value mono" style="font-size: 1.2rem;">${{ "%.2f"|format(budget.daily_remaining) }}</div>
                 <div class="stat-label">Remaining</div>
             </div>
         </div>
         <div class="progress-bar" style="height: 8px; margin-bottom: 0.75rem;">
             {% set pct = (budget.daily_spend / (budget.daily_spend + budget.daily_remaining) * 100) if (budget.daily_spend + budget.daily_remaining) > 0 else 0 %}
-            <div class="progress-bar-fill" style="width: {{ pct|int }}%; background: {% if pct > 80 %}var(--rose){% elif pct > 50 %}var(--amber){% else %}var(--green){% endif %};"></div>
+            <div id="budget-bar" class="progress-bar-fill" style="width: {{ pct|int }}%; background: {% if pct > 80 %}var(--rose){% elif pct > 50 %}var(--amber){% else %}var(--green){% endif %};"></div>
         </div>
+        <div id="budget-alerts">
         {% for alert in budget.get('alerts', []) %}
         <div class="alert {% if alert.severity == 'critical' %}alert-error{% else %}alert-warning{% endif %}" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">{{ alert.message }}</div>
         {% endfor %}
+        </div>
         {% endif %}
+        </div>
 
         <h3 style="margin-top: 1rem;">Active Directives</h3>
+        <div id="directives-list">
         {% if active_directives %}
         {% for d in active_directives %}
         <div style="padding: 0.3rem 0; border-bottom: 1px solid var(--border);">
@@ -95,6 +109,7 @@
         {% else %}
         <p class="text-muted" style="font-size: 0.82rem; margin-top: 0.5rem;">No active directives</p>
         {% endif %}
+        </div>
     </div>
 </div>
 
@@ -240,10 +255,9 @@
 {% endif %}
 
 <!-- ── Knowledge Graph ────────────────────────────────────────────── -->
-{% if knowledge_highlights %}
-<div class="card">
-    <h2>Knowledge Graph <span class="text-muted" style="font-size: 0.75rem; font-weight: 400;">{{ health.get('knowledge', {}).get('entities', 0) }} entities</span></h2>
-    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem;">
+<div class="card" id="kg-card">
+    <h2>Knowledge Graph <span id="kg-count" class="text-muted" style="font-size: 0.75rem; font-weight: 400;">{{ health.get('knowledge', {}).get('entities', 0) if health else 0 }} entities</span></h2>
+    <div id="kg-highlights" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem;">
         {% for entity in knowledge_highlights %}
         <div style="padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-hover);">
             <span style="font-weight: 600; font-size: 0.82rem;">{{ entity.name }}</span>
@@ -255,13 +269,167 @@
         <a href="/knowledge" class="btn" style="font-size: 0.78rem;">Explore Graph →</a>
     </div>
 </div>
-{% endif %}
 
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// Auto-refresh dashboard every 60 seconds
-setTimeout(function() { location.reload(); }, 60000);
+(function() {
+    var INTERVAL = 30;
+    var remaining = INTERVAL;
+    var countdownEl = document.getElementById('refresh-countdown');
+    var dotEl = document.getElementById('refresh-dot');
+
+    // Countdown timer
+    setInterval(function() {
+        remaining--;
+        if (remaining < 0) remaining = INTERVAL;
+        countdownEl.textContent = remaining + 's';
+    }, 1000);
+
+    function fmt(n, d) { return (n || 0).toFixed(d === undefined ? 0 : d); }
+
+    function healthColor(status) {
+        if (status === 'healthy') return 'text-green';
+        if (status === 'degraded') return 'text-amber';
+        return 'text-rose';
+    }
+
+    function perfColor(p) {
+        if (p >= 0.8) return 'var(--green)';
+        if (p >= 0.6) return 'var(--amber)';
+        return 'var(--rose)';
+    }
+
+    function budgetColor(pct) {
+        if (pct > 80) return 'var(--rose)';
+        if (pct > 50) return 'var(--amber)';
+        return 'var(--green)';
+    }
+
+    function escHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function refreshDashboard() {
+        dotEl.style.background = 'var(--amber)';
+
+        fetch('/dashboard/api/dashboard/stats')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                dotEl.style.background = 'var(--green)';
+                remaining = INTERVAL;
+
+                // Top stats
+                var h = data.health || {};
+                var hh = h.health || {};
+                var el = document.getElementById('stat-health');
+                if (el) {
+                    el.textContent = (hh.status || '?').toUpperCase();
+                    el.className = 'stat-value ' + healthColor(hh.status);
+                }
+                var ek = document.getElementById('stat-entities');
+                if (ek) ek.textContent = (h.knowledge || {}).entities || 0;
+                var em = document.getElementById('stat-memories');
+                if (em) em.textContent = (h.memory || {}).entries || 0;
+
+                // Budget
+                var b = data.budget || {};
+                var bs = document.getElementById('stat-spend');
+                if (bs) bs.textContent = '$' + fmt(b.daily_spend, 2);
+                var bd = document.getElementById('budget-daily');
+                if (bd) bd.textContent = '$' + fmt(b.daily_spend, 2);
+                var br = document.getElementById('budget-remaining');
+                if (br) br.textContent = '$' + fmt(b.daily_remaining, 2);
+                var total = (b.daily_spend || 0) + (b.daily_remaining || 0);
+                var pct = total > 0 ? (b.daily_spend / total * 100) : 0;
+                var bar = document.getElementById('budget-bar');
+                if (bar) {
+                    bar.style.width = Math.round(pct) + '%';
+                    bar.style.background = budgetColor(pct);
+                }
+
+                // Budget alerts
+                var alertsEl = document.getElementById('budget-alerts');
+                if (alertsEl && b.alerts) {
+                    var html = '';
+                    for (var i = 0; i < b.alerts.length; i++) {
+                        var a = b.alerts[i];
+                        html += '<div class="alert ' + (a.severity === 'critical' ? 'alert-error' : 'alert-warning') + '" style="padding:0.4rem 0.75rem;font-size:0.8rem;">' + escHtml(a.message) + '</div>';
+                    }
+                    alertsEl.innerHTML = html;
+                }
+
+                // Fleet
+                var fleetEl = document.getElementById('fleet-list');
+                if (fleetEl && data.fleet_stats) {
+                    var html = '';
+                    for (var i = 0; i < data.fleet_stats.length; i++) {
+                        var lt = data.fleet_stats[i];
+                        var p = lt.performance || 0;
+                        html += '<div style="display:flex;align-items:center;gap:0.75rem;padding:0.4rem 0;border-bottom:1px solid var(--border);">'
+                            + '<div style="width:120px;font-weight:500;font-size:0.85rem;">' + escHtml((lt.name || '').substring(0,15)) + '</div>'
+                            + '<span class="badge badge-purple" style="font-size:0.6rem;width:70px;text-align:center;">' + escHtml(lt.domain || '') + '</span>'
+                            + '<div style="flex:1;"><div class="progress-bar" style="height:6px;"><div class="progress-bar-fill" style="width:' + Math.round(p*100) + '%;background:' + perfColor(p) + ';"></div></div></div>'
+                            + '<span class="mono text-muted" style="font-size:0.72rem;width:40px;">' + Math.round(p*100) + '%</span>'
+                            + '<span class="mono" style="font-size:0.72rem;width:35px;">' + (lt.tasks || 0) + '</span>'
+                            + '</div>';
+                    }
+                    fleetEl.innerHTML = html || '<p class="text-muted" style="font-size:0.82rem;">No lieutenants</p>';
+                }
+
+                // Active directives
+                var dirEl = document.getElementById('directives-list');
+                if (dirEl && data.active_directives) {
+                    if (data.active_directives.length === 0) {
+                        dirEl.innerHTML = '<p class="text-muted" style="font-size:0.82rem;margin-top:0.5rem;">No active directives</p>';
+                    } else {
+                        var html = '';
+                        for (var i = 0; i < data.active_directives.length; i++) {
+                            var d = data.active_directives[i];
+                            html += '<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);">'
+                                + '<a href="/directives/' + escHtml(d.id) + '" style="font-size:0.85rem;">' + escHtml((d.title || '').substring(0,40)) + '</a>'
+                                + '<span class="badge badge-blue" style="margin-left:0.5rem;font-size:0.6rem;">' + escHtml(d.status || '') + '</span>'
+                                + '</div>';
+                        }
+                        dirEl.innerHTML = html;
+                    }
+                }
+
+                // Knowledge graph
+                var kgCount = document.getElementById('kg-count');
+                if (kgCount) kgCount.textContent = ((h.knowledge || {}).entities || 0) + ' entities';
+                var kgEl = document.getElementById('kg-highlights');
+                if (kgEl && data.knowledge_highlights) {
+                    var html = '';
+                    for (var i = 0; i < data.knowledge_highlights.length; i++) {
+                        var e = data.knowledge_highlights[i];
+                        html += '<div style="padding:0.35rem 0.65rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-hover);">'
+                            + '<span style="font-weight:600;font-size:0.82rem;">' + escHtml(e.name || '') + '</span>'
+                            + '<span class="badge badge-purple" style="font-size:0.55rem;margin-left:0.3rem;">' + escHtml(e.type || '') + '</span>'
+                            + '</div>';
+                    }
+                    kgEl.innerHTML = html;
+                }
+
+                // Scheduler
+                var st = document.getElementById('sched-ticks');
+                if (st && data.scheduler) {
+                    st.textContent = data.scheduler.total_ticks || 0;
+                    var sj = document.getElementById('sched-jobs');
+                    if (sj) sj.textContent = data.scheduler.total_jobs || 0;
+                    var se = document.getElementById('sched-errors');
+                    if (se) se.textContent = data.scheduler.errors || 0;
+                }
+            })
+            .catch(function() {
+                dotEl.style.background = 'var(--rose)';
+            });
+    }
+
+    setInterval(refreshDashboard, INTERVAL * 1000);
+})();
 </script>
 {% endblock %}

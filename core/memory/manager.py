@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Generator
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,18 @@ class MemoryManager:
         from db.repositories.memory import MemoryRepository
         session = get_session()
         return MemoryRepository(session)
+
+    @contextmanager
+    def _repo_scope(self) -> Generator[Any, None, None]:
+        """Yield a repository with guaranteed session cleanup."""
+        from db.engine import get_session
+        from db.repositories.memory import MemoryRepository
+
+        session = get_session()
+        try:
+            yield MemoryRepository(session)
+        finally:
+            session.close()
 
     def store(
         self,
@@ -149,6 +162,7 @@ class MemoryManager:
         memory_types: list[str] | None = None,
         lieutenant_id: str = "",
         limit: int = 20,
+        refresh_on_access: bool = True,
     ) -> list[dict]:
         """Recall memories matching a query.
 
@@ -161,46 +175,46 @@ class MemoryManager:
         Returns:
             List of memory entries as dicts.
         """
-        repo = self._get_repo()
+        with self._repo_scope() as repo:
+            if query:
+                entries = repo.search(
+                    query=query,
+                    empire_id=self.empire_id,
+                    lieutenant_id=lieutenant_id or None,
+                    memory_types=memory_types,
+                    limit=limit,
+                )
+            else:
+                entries = repo.get_most_important(
+                    empire_id=self.empire_id,
+                    lieutenant_id=lieutenant_id or None,
+                    memory_types=memory_types,
+                    limit=limit,
+                )
 
-        if query:
-            entries = repo.search(
-                query=query,
-                empire_id=self.empire_id,
-                lieutenant_id=lieutenant_id or None,
-                memory_types=memory_types,
-                limit=limit,
-            )
-        else:
-            entries = repo.get_most_important(
-                empire_id=self.empire_id,
-                lieutenant_id=lieutenant_id or None,
-                memory_types=memory_types,
-                limit=limit,
-            )
+            # Refresh access counts only when requested; don't let lock errors fail reads.
+            if refresh_on_access:
+                try:
+                    for entry in entries:
+                        entry.refresh()
+                    repo.flush()
+                except Exception:
+                    repo.rollback()
 
-        # Refresh access counts (best-effort — don't fail reads on write errors)
-        try:
-            for entry in entries:
-                entry.refresh()
-            repo.flush()
-        except Exception:
-            pass  # Access count update is not critical
-
-        return [
-            {
-                "id": e.id,
-                "type": e.memory_type,
-                "title": e.title,
-                "content": e.content,
-                "importance": e.effective_importance,
-                "category": e.category,
-                "tags": e.tags_json,
-                "metadata": e.metadata_json,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-            }
-            for e in entries
-        ]
+            return [
+                {
+                    "id": e.id,
+                    "type": e.memory_type,
+                    "title": e.title,
+                    "content": e.content,
+                    "importance": e.effective_importance,
+                    "category": e.category,
+                    "tags": e.tags_json,
+                    "metadata": e.metadata_json,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in entries
+            ]
 
     def recall_for_context(
         self,
@@ -216,30 +230,30 @@ class MemoryManager:
         Returns:
             MemoryContext organized by tier.
         """
-        repo = self._get_repo()
-        memories_by_type = repo.get_for_context(
-            empire_id=self.empire_id,
-            lieutenant_id=lieutenant_id,
-            token_budget=token_budget,
-        )
-        repo.commit()
+        with self._repo_scope() as repo:
+            memories_by_type = repo.get_for_context(
+                empire_id=self.empire_id,
+                lieutenant_id=lieutenant_id,
+                token_budget=token_budget,
+            )
+            repo.commit()
 
-        context = MemoryContext()
-        for mtype, entries in memories_by_type.items():
-            items = [
-                {"id": e.id, "content": e.content, "title": e.title, "importance": e.effective_importance}
-                for e in entries
-            ]
-            setattr(context, mtype, items)
-            context.total_count += len(items)
+            context = MemoryContext()
+            for mtype, entries in memories_by_type.items():
+                items = [
+                    {"id": e.id, "content": e.content, "title": e.title, "importance": e.effective_importance}
+                    for e in entries
+                ]
+                setattr(context, mtype, items)
+                context.total_count += len(items)
 
-        context.token_estimate = sum(
-            len(m.get("content", "")) // 4
-            for memories in [context.semantic, context.experiential, context.design, context.episodic]
-            for m in memories
-        )
+            context.token_estimate = sum(
+                len(m.get("content", "")) // 4
+                for memories in [context.semantic, context.experiential, context.design, context.episodic]
+                for m in memories
+            )
 
-        return context
+            return context
 
     def consolidate(self, lieutenant_id: str = "") -> int:
         """Consolidate related memories by promoting episodic → experiential.
@@ -250,37 +264,37 @@ class MemoryManager:
         Returns:
             Number of memories promoted.
         """
-        repo = self._get_repo()
-        candidates = repo.get_promotion_candidates(
-            empire_id=self.empire_id,
-            min_importance=0.7,
-            min_access_count=3,
-        )
-
-        promoted = 0
-        for entry in candidates:
-            if lieutenant_id and entry.lieutenant_id != lieutenant_id:
-                continue
-
-            # Create experiential memory from episodic
-            self.store(
-                content=f"[Promoted from episodic] {entry.content}",
-                memory_type="experiential",
-                lieutenant_id=entry.lieutenant_id or "",
-                title=f"Lesson: {entry.title}" if entry.title else "Promoted lesson",
-                category=entry.category,
-                importance=entry.importance_score * 1.1,  # Slight boost
-                tags=entry.tags_json or [],
-                source_type="promotion",
-                metadata={"promoted_from": entry.id},
+        with self._repo_scope() as repo:
+            candidates = repo.get_promotion_candidates(
+                empire_id=self.empire_id,
+                min_importance=0.7,
+                min_access_count=3,
             )
 
-            repo.mark_promoted(entry.id, "experiential")
-            promoted += 1
+            promoted = 0
+            for entry in candidates:
+                if lieutenant_id and entry.lieutenant_id != lieutenant_id:
+                    continue
 
-        repo.commit()
-        logger.info("Consolidated %d episodic memories to experiential", promoted)
-        return promoted
+                # Create experiential memory from episodic
+                self.store(
+                    content=f"[Promoted from episodic] {entry.content}",
+                    memory_type="experiential",
+                    lieutenant_id=entry.lieutenant_id or "",
+                    title=f"Lesson: {entry.title}" if entry.title else "Promoted lesson",
+                    category=entry.category,
+                    importance=entry.importance_score * 1.1,  # Slight boost
+                    tags=entry.tags_json or [],
+                    source_type="promotion",
+                    metadata={"promoted_from": entry.id},
+                )
+
+                repo.mark_promoted(entry.id, "experiential")
+                promoted += 1
+
+            repo.commit()
+            logger.info("Consolidated %d episodic memories to experiential", promoted)
+            return promoted
 
     def decay(self, rate: float = 0.01) -> int:
         """Apply temporally-aware decay to all memories.
@@ -357,22 +371,21 @@ class MemoryManager:
         Returns:
             Cleanup stats.
         """
-        repo = self._get_repo()
+        with self._repo_scope() as repo:
+            expired = repo.cleanup_expired(self.empire_id)
+            low_importance = repo.cleanup_low_importance(self.empire_id, threshold=importance_threshold)
+            old_episodic = repo.cleanup_old_episodic(self.empire_id, days=30)
 
-        expired = repo.cleanup_expired(self.empire_id)
-        low_importance = repo.cleanup_low_importance(self.empire_id, threshold=importance_threshold)
-        old_episodic = repo.cleanup_old_episodic(self.empire_id, days=30)
+            repo.commit()
 
-        repo.commit()
-
-        stats = {
-            "expired_removed": expired,
-            "low_importance_removed": low_importance,
-            "old_episodic_removed": old_episodic,
-            "total_removed": expired + low_importance + old_episodic,
-        }
-        logger.info("Memory cleanup: %s", stats)
-        return stats
+            stats = {
+                "expired_removed": expired,
+                "low_importance_removed": low_importance,
+                "old_episodic_removed": old_episodic,
+                "total_removed": expired + low_importance + old_episodic,
+            }
+            logger.info("Memory cleanup: %s", stats)
+            return stats
 
     def get_stats(self, lieutenant_id: str = "") -> MemoryStats:
         """Get memory statistics.
@@ -383,15 +396,15 @@ class MemoryManager:
         Returns:
             Memory statistics.
         """
-        repo = self._get_repo()
-        raw_stats = repo.get_stats(self.empire_id, lieutenant_id or None)
+        with self._repo_scope() as repo:
+            raw_stats = repo.get_stats(self.empire_id, lieutenant_id or None)
 
-        return MemoryStats(
-            total_count=raw_stats.get("total", 0),
-            by_type=raw_stats.get("by_type", {}),
-            avg_importance=raw_stats.get("avg_importance", 0.0),
-            avg_decay=raw_stats.get("avg_decay", 0.0),
-        )
+            return MemoryStats(
+                total_count=raw_stats.get("total", 0),
+                by_type=raw_stats.get("by_type", {}),
+                avg_importance=raw_stats.get("avg_importance", 0.0),
+                avg_decay=raw_stats.get("avg_decay", 0.0),
+            )
 
     def search(
         self,

@@ -165,39 +165,18 @@ class ResearchPipeline:
             from core.search.web import WebSearcher
             searcher = WebSearcher(self.empire_id)
 
-            # Run multiple search types
-            queries = [
-                topic,
-                f"{topic} latest news 2026",
-                f"{topic} research paper",
-            ]
+            # LLM-refined search: generates targeted queries from the topic
+            search_data = searcher.search_and_summarize(topic, max_results=max_sources, refine=True)
 
-            all_results = []
-            all_urls = []
-            summaries = []
-
-            for query in queries:
-                search_data = searcher.search_and_summarize(query, max_results=max_sources // len(queries))
-                if search_data.get("found"):
-                    all_results.extend(search_data.get("results", []))
-                    summaries.append(search_data.get("summary", ""))
-                    for r in search_data.get("results", []):
-                        if r.get("url"):
-                            all_urls.append(r["url"])
-
-            # Deduplicate URLs
-            seen_urls = set()
-            unique_urls = []
-            for url in all_urls:
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    unique_urls.append(url)
+            all_results = search_data.get("results", [])
+            all_urls = [r["url"] for r in all_results if r.get("url")]
+            queries = search_data.get("queries_used", [topic])
 
             stage.items_produced = len(all_results)
             stage.data = {
                 "results": len(all_results),
-                "urls": unique_urls[:max_sources],
-                "summary": "\n\n".join(summaries)[:6000],
+                "urls": all_urls[:max_sources],
+                "summary": search_data.get("summary", "")[:6000],
                 "queries": queries,
             }
 

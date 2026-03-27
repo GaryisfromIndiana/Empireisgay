@@ -562,7 +562,7 @@ class ModelRouter:
                 purpose="llm_call",
             )
         except Exception as e:
-            logger.debug("Could not record cost: %s", e)
+            logger.warning("Could not record cost: %s", e)
 
     def _update_health(
         self,

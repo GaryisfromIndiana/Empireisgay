@@ -15,6 +15,7 @@ from typing import Any, Optional
 from llm.base import LLMRequest, LLMResponse, LLMMessage
 from llm.router import ModelRouter, TaskMetadata
 from llm.schemas import PlanningOutput, CriticOutput, parse_llm_output
+from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +216,7 @@ class ACEEngine:
             result.model_used = execution.get("model", "")
 
             # ── Stage 3: Critic loop ───────────────────────────────────
+            critic_failures = 0
             for iteration in range(self._max_iterations):
                 result.pipeline_iterations = iteration + 1
 
@@ -229,6 +231,8 @@ class ACEEngine:
                     result.success = True
                     break
 
+                critic_failures += 1
+
                 # Quality not met — retry if we have iterations left
                 if iteration < self._max_iterations - 1:
                     logger.info(
@@ -236,6 +240,25 @@ class ACEEngine:
                         task.id, result.quality_score, self._min_quality,
                         iteration + 1, self._max_iterations,
                     )
+
+                    # Escalate to premium model if repeated failures
+                    escalation_threshold = getattr(
+                        getattr(get_settings(), "ace", None),
+                        "escalate_after_failures",
+                        2
+                    )
+                    if critic_failures >= escalation_threshold and not task.model_override:
+                        escalation_model = getattr(
+                            getattr(get_settings(), "ace", None),
+                            "escalation_model",
+                            "claude-opus-4"
+                        )
+                        logger.warning(
+                            "Task %s: escalating to %s after %d quality failures",
+                            task.id, escalation_model, critic_failures
+                        )
+                        task.model_override = escalation_model
+
                     # Re-execute with critic feedback
                     feedback = critic_eval.get("suggestions", [])
                     issues = critic_eval.get("issues", [])

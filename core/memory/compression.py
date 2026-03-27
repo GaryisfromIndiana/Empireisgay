@@ -112,7 +112,7 @@ class MemoryCompressor:
 
         # Get all memories, sorted by type and category
         for mtype in ["episodic", "semantic"]:
-            memories = mm.recall(memory_types=[mtype], limit=200)
+            memories = mm.recall(memory_types=[mtype], limit=200, refresh_on_access=False)
 
             for mem in memories:
                 # Skip high-importance memories
@@ -316,7 +316,7 @@ Respond as JSON:
         from core.memory.manager import MemoryManager
         mm = MemoryManager(self.empire_id)
 
-        all_memories = mm.recall(limit=500)
+        all_memories = mm.recall(limit=500, refresh_on_access=False)
 
         total = len(all_memories)
         compressed = 0
@@ -354,7 +354,7 @@ Respond as JSON:
         from core.memory.manager import MemoryManager
         mm = MemoryManager(self.empire_id)
 
-        memories = mm.recall(query=topic, limit=30)
+        memories = mm.recall(query=topic, limit=30, refresh_on_access=False)
         if len(memories) < self.min_cluster_size:
             return None
 

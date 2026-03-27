@@ -302,7 +302,7 @@ def read_session(engine: Engine | None = None) -> Generator[Session, None, None]
 
 
 def init_db(engine: Engine | None = None) -> None:
-    """Initialize the database by creating all tables.
+    """Initialize the database by creating all tables and seed the default empire.
 
     Args:
         engine: SQLAlchemy engine. If None, uses default.
@@ -314,6 +314,41 @@ def init_db(engine: Engine | None = None) -> None:
 
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
+
+    # Ensure the default empire record exists (required for FK constraints on budget_logs etc.)
+    _ensure_default_empire(engine)
+
+
+def _ensure_default_empire(engine: Engine) -> None:
+    """Create the default empire row if it doesn't exist."""
+    try:
+        from config.settings import get_settings
+        from db.models import Empire
+        from sqlalchemy.orm import Session as SASession
+
+        settings = get_settings()
+        empire_id = settings.empire_id
+        if not empire_id:
+            return
+
+        with SASession(engine) as session:
+            existing = session.get(Empire, empire_id)
+            if existing:
+                return
+
+            empire = Empire(
+                id=empire_id,
+                name=settings.empire_name,
+                description=settings.empire_description,
+                domain="ai_research",
+                status="active",
+            )
+            session.add(empire)
+            session.commit()
+            logger.info("Created default empire: %s (%s)", empire_id, settings.empire_name)
+
+    except Exception as e:
+        logger.warning("Could not seed default empire: %s", e)
 
 
 def drop_db(engine: Engine | None = None) -> None:

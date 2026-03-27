@@ -316,12 +316,15 @@ class BudgetManager:
             from db.models import BudgetLog
 
             session = get_session()
-            result = session.execute(
-                select(func.coalesce(func.sum(BudgetLog.cost_usd), 0.0))
-                .where(BudgetLog.empire_id == self.empire_id)
-                .where(BudgetLog.cost_date == date_str)
-            ).scalar()
-            return float(result or 0.0)
+            try:
+                result = session.execute(
+                    select(func.coalesce(func.sum(BudgetLog.cost_usd), 0.0))
+                    .where(BudgetLog.empire_id == self.empire_id)
+                    .where(BudgetLog.cost_date == date_str)
+                ).scalar()
+                return float(result or 0.0)
+            finally:
+                session.close()
         except Exception:
             return 0.0
 
@@ -333,11 +336,14 @@ class BudgetManager:
             from db.models import BudgetLog
 
             session = get_session()
-            result = session.execute(
-                select(func.coalesce(func.sum(BudgetLog.cost_usd), 0.0))
-                .where(BudgetLog.empire_id == self.empire_id)
-                .where(BudgetLog.cost_month == month_str)
-            ).scalar()
-            return float(result or 0.0)
+            try:
+                result = session.execute(
+                    select(func.coalesce(func.sum(BudgetLog.cost_usd), 0.0))
+                    .where(BudgetLog.empire_id == self.empire_id)
+                    .where(BudgetLog.cost_month == month_str)
+                ).scalar()
+                return float(result or 0.0)
+            finally:
+                session.close()
         except Exception:
             return 0.0

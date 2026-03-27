@@ -248,6 +248,7 @@ class DirectiveManager:
 
             # Execute tasks in parallel within the wave
             from concurrent.futures import ThreadPoolExecutor, as_completed
+            from config.settings import get_settings
 
             def _execute_one(task_data_and_lt):
                 td, lt = task_data_and_lt
@@ -255,7 +256,8 @@ class DirectiveManager:
                 result = lt.execute_task(task)
                 return td, lt, result
 
-            with ThreadPoolExecutor(max_workers=min(3, len(task_assignments) or 1)) as executor:
+            max_workers = min(get_settings().ace.max_parallel_tasks, len(task_assignments) or 1)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_task = {
                     executor.submit(_execute_one, assignment): assignment[0]
                     for assignment in task_assignments

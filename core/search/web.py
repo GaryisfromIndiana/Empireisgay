@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -10,7 +11,7 @@ from typing import Any
 try:
     from ddgs import DDGS
 except ImportError:
-    from duckduckgo_search import DDGS
+    DDGS = importlib.import_module("duckduckgo_search").DDGS
 
 logger = logging.getLogger(__name__)
 
@@ -213,28 +214,111 @@ class WebSearcher:
         query = f"{model_name} AI model" if model_name else "latest AI model release 2026"
         return self.search(query, max_results=max_results, time_range="m")
 
+    def refine_query(self, raw_query: str, max_queries: int = 4) -> list[str]:
+        """Use an LLM to expand a raw query into multiple targeted search queries.
+
+        Takes a natural-language topic and generates specific, diverse queries
+        that cover different angles — news, technical, academic, competitive.
+        Uses Haiku for speed and cost.
+
+        Args:
+            raw_query: The raw user query or topic.
+            max_queries: Maximum number of refined queries to generate.
+
+        Returns:
+            List of refined search query strings. Falls back to [raw_query]
+            on any error.
+        """
+        try:
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+            import json
+
+            router = ModelRouter(self.empire_id)
+
+            prompt = (
+                "You are a search query optimizer for an AI research system. "
+                "Given a research topic, generate exactly "
+                f"{max_queries} targeted web search queries that will find "
+                "the most relevant, recent, and diverse results.\n\n"
+                "Each query should cover a different angle:\n"
+                "- Recent news and announcements\n"
+                "- Technical details, specs, or documentation\n"
+                "- Academic papers or research\n"
+                "- Comparisons, benchmarks, or competitive analysis\n\n"
+                "Make queries specific and search-engine-optimized "
+                "(use key terms, not full sentences).\n\n"
+                f'Topic: "{raw_query}"\n\n'
+                "Respond with ONLY a JSON array of query strings, nothing else.\n"
+                f'Example: ["query 1", "query 2", "query 3", "query 4"]'
+            )
+
+            response = router.execute(
+                LLMRequest(
+                    messages=[LLMMessage.user(prompt)],
+                    max_tokens=200,
+                    temperature=0.4,
+                ),
+                TaskMetadata(task_type="extraction", complexity="simple"),
+            )
+
+            text = response.content.strip()
+            start = text.find("[")
+            end = text.rfind("]") + 1
+            if start >= 0 and end > start:
+                queries = json.loads(text[start:end])
+                if isinstance(queries, list) and queries:
+                    refined = [q for q in queries if isinstance(q, str) and q.strip()]
+                    if refined:
+                        logger.info(
+                            "Query refined: '%s' → %d queries (cost $%.4f)",
+                            raw_query, len(refined), response.cost_usd,
+                        )
+                        return refined[:max_queries]
+
+        except Exception as e:
+            logger.debug("Query refinement failed, using raw query: %s", e)
+
+        return [raw_query]
+
     def search_and_summarize(
         self,
         query: str,
         max_results: int = 5,
+        refine: bool = True,
     ) -> dict:
         """Search the web and create an LLM-ready summary.
 
         Args:
             query: Search query.
             max_results: Maximum results.
+            refine: Whether to use LLM query refinement.
 
         Returns:
             Dict with results formatted for LLM prompt injection.
         """
-        response = self.search(query, max_results=max_results)
+        if refine:
+            queries = self.refine_query(query)
+        else:
+            queries = [query]
 
-        if not response.results:
+        all_results = []
+        seen_urls = set()
+        per_query = max(2, max_results // len(queries))
+
+        for q in queries:
+            response = self.search(q, max_results=per_query)
+            for r in response.results:
+                if r.url not in seen_urls:
+                    seen_urls.add(r.url)
+                    all_results.append(r)
+
+        if not all_results:
             return {"query": query, "found": False, "summary": "No results found."}
 
         # Format for LLM consumption
         formatted = []
-        for i, r in enumerate(response.results, 1):
+        for i, r in enumerate(all_results[:max_results], 1):
             formatted.append(
                 f"[{i}] {r.title}\n"
                 f"    Source: {r.source}\n"
@@ -246,13 +330,14 @@ class WebSearcher:
         return {
             "query": query,
             "found": True,
-            "result_count": len(response.results),
+            "result_count": len(all_results),
+            "queries_used": queries,
             "summary": summary,
             "results": [
                 {"title": r.title, "url": r.url, "snippet": r.snippet}
-                for r in response.results
+                for r in all_results[:max_results]
             ],
-            "search_time_ms": response.search_time_ms,
+            "search_time_ms": 0.0,
         }
 
     def search_and_store(
@@ -347,6 +432,73 @@ class WebSearcher:
             char_count += len(entry)
 
         return "\n".join(parts)
+
+    def research_topic(
+        self,
+        topic: str,
+        depth: str = "standard",
+        max_results: int = 8,
+    ) -> dict:
+        """Research a topic end-to-end: refine queries, search, store, and synthesize.
+
+        This is the main entry point used by the God Panel RESEARCH action.
+
+        Args:
+            topic: Research topic.
+            depth: "shallow" (search only), "standard" (search+store),
+                   "deep" (search+store+synthesize).
+            max_results: Maximum search results.
+
+        Returns:
+            Dict with success, sources, synthesis, cost, etc.
+        """
+        # Step 1: LLM-refined search + store to KG/memory
+        search_data = self.search_and_store(topic, max_results=max_results)
+
+        result = {
+            "success": search_data.get("found", False),
+            "source_count": search_data.get("result_count", 0),
+            "queries_used": search_data.get("queries_used", [topic]),
+            "stored_entities": search_data.get("stored_entities", 0),
+            "stored_memories": search_data.get("stored_memories", 0),
+            "cost_usd": 0.0,
+        }
+
+        if depth == "shallow" or not search_data.get("found"):
+            return result
+
+        # Step 2: Synthesize findings with LLM (for standard and deep)
+        try:
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+
+            router = ModelRouter(self.empire_id)
+            tier = "synthesis" if depth == "deep" else "analysis"
+
+            prompt = (
+                f"You are an AI research analyst. Based on these search results "
+                f"about '{topic}', write a concise research brief covering:\n"
+                f"1. Key findings\n2. Major players\n3. Technical details\n"
+                f"4. Trends and implications\n\n"
+                f"Search results:\n{search_data.get('summary', '')[:6000]}"
+            )
+
+            response = router.execute(
+                LLMRequest(
+                    messages=[LLMMessage.user(prompt)],
+                    max_tokens=1000,
+                    temperature=0.3,
+                ),
+                TaskMetadata(task_type=tier, complexity="moderate"),
+            )
+
+            result["synthesis"] = response.content
+            result["cost_usd"] = response.cost_usd
+
+        except Exception as e:
+            logger.warning("Research synthesis failed for '%s': %s", topic, e)
+
+        return result
 
     @staticmethod
     def _extract_domain(url: str) -> str:

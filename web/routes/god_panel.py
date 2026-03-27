@@ -1,4 +1,12 @@
-"""God Panel — unified command interface across all empires."""
+"""God Panel — unified command interface across all empires.
+
+The God Panel is the brain of Empire. Every command flows through here:
+1. Memory check — what does Empire already know about this topic?
+2. Classification — which action type fits best?
+3. Lieutenant routing — which specialists should weigh in?
+4. Execution — research, pipeline, directive, war room, etc.
+5. Knowledge compounding — findings feed back into KG + memory
+"""
 
 from __future__ import annotations
 
@@ -126,10 +134,14 @@ def god_panel():
 
 @god_panel_bp.route("/command", methods=["POST"])
 def execute_command():
-    """Execute a single natural-language command across the empire network.
+    """Execute a natural-language command through the full Empire brain.
 
-    The God Panel interprets the command, routes it to the right lieutenants,
-    and returns results.
+    Upgraded flow:
+    1. Memory recall — check what Empire already knows
+    2. Knowledge graph check — find related entities
+    3. LLM classification — pick the right action + lieutenants
+    4. Execute action (with lieutenant perspectives for RESEARCH)
+    5. Compound results — store findings back to KG + memory
     """
     empire_id = current_app.config.get("EMPIRE_ID", "")
     data = request.get_json(silent=True) or {}
@@ -139,76 +151,128 @@ def execute_command():
         return jsonify({"error": "No command provided"}), 400
 
     try:
+        import json
         from llm.router import ModelRouter, TaskMetadata
         from llm.base import LLMRequest, LLMMessage
-        router = ModelRouter()
+        router = ModelRouter(empire_id)
 
-        # Step 1: Classify the command
+        total_cost = 0.0
+
+        # ── Step 1: Check what Empire already knows ─────────────────────
+        prior_knowledge = ""
+        related_entities = []
+        try:
+            from core.memory.manager import MemoryManager
+            mm = MemoryManager(empire_id)
+            memories = mm.recall(query=command, memory_types=["semantic", "experiential"], limit=5)
+            if memories:
+                prior_parts = []
+                for m in memories:
+                    content = getattr(m, "content", "") if not isinstance(m, dict) else m.get("content", "")
+                    title = getattr(m, "title", "") if not isinstance(m, dict) else m.get("title", "")
+                    if content:
+                        prior_parts.append(f"- {title}: {content[:200]}" if title else f"- {content[:200]}")
+                if prior_parts:
+                    prior_knowledge = "Empire's existing knowledge on this topic:\n" + "\n".join(prior_parts[:5])
+        except Exception as e:
+            logger.debug("Memory recall for God Panel failed: %s", e)
+
+        try:
+            from core.knowledge.graph import KnowledgeGraph
+            graph = KnowledgeGraph(empire_id)
+            entities = graph.find_entities(query=command, limit=5)
+            if entities:
+                related_entities = [
+                    {"name": getattr(e, "name", ""), "type": getattr(e, "entity_type", ""), "description": getattr(e, "description", "")[:100]}
+                    for e in entities
+                ]
+        except Exception as e:
+            logger.debug("KG search for God Panel failed: %s", e)
+
+        # ── Step 2: Classify with full context ──────────────────────────
+        context_block = ""
+        if prior_knowledge:
+            context_block += f"\n\n## What Empire Already Knows\n{prior_knowledge}"
+        if related_entities:
+            entity_lines = [f"- {e['name']} ({e['type']}): {e['description']}" for e in related_entities[:5]]
+            context_block += f"\n\n## Related Knowledge Graph Entities\n" + "\n".join(entity_lines)
+
         classify_prompt = (
-            "You are the God Panel of an autonomous AI research system called Empire.\n"
-            "Empire has 6 lieutenants: Model Intelligence (models), Research Scout (research), "
-            "Agent Systems (agents), Tooling & Infra (tooling), Industry & Strategy (industry), "
-            "Open Source (open_source).\n\n"
+            "You are the God Panel — the brain of an autonomous AI research system called Empire.\n"
+            "Empire has 6 lieutenant specialists:\n"
+            "  - Model Intelligence (models): LLM releases, benchmarks, pricing, capabilities\n"
+            "  - Research Scout (research): Papers, training techniques, alignment, scaling\n"
+            "  - Agent Systems (agents): Multi-agent, tool use, frameworks, MCP\n"
+            "  - Tooling & Infra (tooling): APIs, inference, vector DBs, deployment\n"
+            "  - Industry & Strategy (industry): Company strategy, funding, enterprise\n"
+            "  - Open Source (open_source): Open weight models, HuggingFace, local inference\n\n"
             "Available actions:\n"
-            "- RESEARCH: Research a topic (routes to /api/research)\n"
-            "- DIRECTIVE: Create and execute a multi-lieutenant directive\n"
-            "- WARROOM: Start a multi-lieutenant debate on a topic\n"
-            "- SWEEP: Run an intelligence sweep for new discoveries\n"
-            "- EVOLVE: Trigger an evolution cycle\n"
-            "- AUDIT: Run a knowledge graph audit\n"
-            "- STATUS: Report system status\n"
-            "- CONTENT: Generate a report on a topic\n"
-            "- PIPELINE: Run full research pipeline (search→scrape→extract→synthesize)\n\n"
+            "- RESEARCH: Deep research on a topic — searches web, consults lieutenants, compounds knowledge\n"
+            "- DIRECTIVE: Create a multi-lieutenant directive for complex multi-step work\n"
+            "- WARROOM: Multi-lieutenant debate where specialists argue from their domain\n"
+            "- SWEEP: Intelligence sweep — scan all sources for new discoveries\n"
+            "- EVOLVE: Trigger a self-improvement evolution cycle\n"
+            "- AUDIT: Deep audit of the knowledge graph for quality issues\n"
+            "- STATUS: Report full system status and health\n"
+            "- CONTENT: Generate a polished report on a topic\n"
+            "- PIPELINE: Full 5-stage research pipeline (search→scrape→extract→deepen→synthesize)\n\n"
+            "IMPORTANT: For research-oriented commands, prefer RESEARCH (engages lieutenants) "
+            "over PIPELINE (no lieutenants). Use PIPELINE only when the user specifically wants "
+            "raw data extraction. Use DIRECTIVE for complex multi-step tasks. Use WARROOM when "
+            "the user wants debate or competing perspectives.\n"
+            f"{context_block}\n\n"
             f'User command: "{command}"\n\n'
-            "Respond with EXACTLY this JSON format:\n"
-            '{"action": "ACTION_TYPE", "topic": "the refined topic/title", '
-            '"description": "detailed description of what to do", '
-            '"lieutenants": ["domain1", "domain2"], "priority": 1-10}'
+            "Respond with EXACTLY this JSON:\n"
+            '{"action": "ACTION_TYPE", "topic": "refined topic", '
+            '"description": "what to do and why", '
+            '"lieutenants": ["domain1", "domain2"], "priority": 1-10, '
+            '"build_on_existing": true/false}'
         )
 
         response = router.execute(
             LLMRequest(
                 messages=[LLMMessage.user(classify_prompt)],
-                max_tokens=300,
+                max_tokens=400,
                 temperature=0.2,
             ),
             TaskMetadata(task_type="classification", complexity="simple"),
         )
+        total_cost += response.cost_usd
 
-        # Parse the classification
-        import json
+        # Parse classification
         try:
-            # Extract JSON from response
             text = response.content
             start = text.find("{")
             end = text.rfind("}") + 1
             if start >= 0 and end > start:
                 plan = json.loads(text[start:end])
             else:
-                plan = {"action": "RESEARCH", "topic": command, "description": command}
+                plan = {"action": "RESEARCH", "topic": command, "description": command, "lieutenants": []}
         except (json.JSONDecodeError, ValueError):
-            plan = {"action": "RESEARCH", "topic": command, "description": command}
+            plan = {"action": "RESEARCH", "topic": command, "description": command, "lieutenants": []}
 
         action = plan.get("action", "RESEARCH").upper()
         topic = plan.get("topic", command)
         description = plan.get("description", command)
         priority = plan.get("priority", 5)
+        assigned_lts = plan.get("lieutenants", [])
+        build_on = plan.get("build_on_existing", False)
 
-        result = {"command": command, "action": action, "plan": plan}
+        result = {
+            "command": command,
+            "action": action,
+            "plan": plan,
+            "prior_knowledge_found": bool(prior_knowledge),
+            "related_entities": len(related_entities),
+        }
 
-        # Step 2: Execute the action
+        # ── Step 3: Execute ─────────────────────────────────────────────
         if action == "RESEARCH":
-            from core.search.web import WebSearcher
-            searcher = WebSearcher(empire_id)
-            search_result = searcher.research_topic(topic, depth="deep")
-            result["status"] = "completed"
-            result["research"] = {
-                "success": search_result.get("success", False),
-                "sources": search_result.get("source_count", 0),
-                "cost": search_result.get("cost_usd", 0),
-            }
-            if search_result.get("synthesis"):
-                result["synthesis"] = search_result["synthesis"][:1000]
+            research_result = _execute_deep_research(
+                empire_id, topic, description, assigned_lts,
+                prior_knowledge, build_on, priority,
+            )
+            result.update(research_result)
 
         elif action == "DIRECTIVE":
             from core.directives.manager import DirectiveManager
@@ -219,7 +283,6 @@ def execute_command():
                 priority=priority,
                 source="god_panel",
             )
-            # Execute in background
             directive_id = directive.get("id", "")
             if directive_id:
                 def run_bg():
@@ -300,19 +363,196 @@ def execute_command():
                 result["synthesis"] = pipe_result.synthesis[:2000]
 
         else:
-            # Default to research
-            from core.search.web import WebSearcher
-            searcher = WebSearcher(empire_id)
-            search_result = searcher.research_topic(topic, depth="deep")
-            result["status"] = "completed"
-            result["research"] = {"sources": search_result.get("source_count", 0)}
+            # Unknown action — fall back to deep research
+            research_result = _execute_deep_research(
+                empire_id, topic, description, assigned_lts,
+                prior_knowledge, build_on, priority,
+            )
+            result.update(research_result)
 
-        result["cost"] = response.cost_usd
+        result["cost"] = total_cost + result.get("research_cost", 0)
         return jsonify(result)
 
     except Exception as e:
         logger.error("God Panel command failed: %s", e)
         return jsonify({"error": str(e), "command": command}), 500
+
+
+def _execute_deep_research(
+    empire_id: str,
+    topic: str,
+    description: str,
+    lieutenant_domains: list[str],
+    prior_knowledge: str,
+    build_on_existing: bool,
+    priority: int,
+) -> dict:
+    """Execute the upgraded RESEARCH action with lieutenant perspectives.
+
+    Flow:
+    1. Run research pipeline (search → scrape → extract → synthesize)
+    2. Get lieutenant perspectives on the findings
+    3. Synthesize everything into a final brief
+    4. Store compounded knowledge
+    """
+    import json
+    result = {"status": "completed", "research_cost": 0.0}
+
+    # ── 1. Research pipeline ────────────────────────────────────────
+    try:
+        from core.research.pipeline import ResearchPipeline
+        pipeline = ResearchPipeline(empire_id)
+        depth = "deep" if priority >= 7 else "standard"
+        pipe_result = pipeline.run(topic, depth=depth)
+
+        result["pipeline"] = {
+            "stages": len(pipe_result.stages),
+            "entities": pipe_result.total_entities,
+            "relations": pipe_result.total_relations,
+            "success": pipe_result.success,
+        }
+        result["research_cost"] += pipe_result.cost_usd
+
+        raw_synthesis = pipe_result.synthesis or ""
+    except Exception as e:
+        logger.warning("Pipeline failed in deep research: %s", e)
+        # Fallback to basic research
+        from core.search.web import WebSearcher
+        searcher = WebSearcher(empire_id)
+        search_result = searcher.research_topic(topic, depth="deep")
+        raw_synthesis = search_result.get("synthesis", "")
+        result["pipeline"] = {"stages": 0, "fallback": True}
+        result["research_cost"] += search_result.get("cost_usd", 0)
+
+    if not raw_synthesis:
+        result["synthesis"] = "Research produced no synthesis."
+        return result
+
+    # ── 2. Lieutenant perspectives ──────────────────────────────────
+    # Domain → role descriptions for lieutenant perspectives
+    DOMAIN_ROLES = {
+        "models": ("Model Intelligence", "LLM releases, benchmarks, pricing, capabilities, architecture comparisons"),
+        "research": ("Research Scout", "AI papers, training techniques, alignment research, scaling laws"),
+        "agents": ("Agent Systems", "multi-agent architectures, tool use, frameworks, MCP, orchestration"),
+        "tooling": ("Tooling & Infra", "APIs, inference engines, vector DBs, deployment, MLOps"),
+        "industry": ("Industry & Strategy", "company strategy, funding rounds, enterprise AI adoption, market dynamics"),
+        "open_source": ("Open Source", "open weight models, HuggingFace releases, local inference, community projects"),
+    }
+
+    lieutenant_insights = []
+    if lieutenant_domains:
+        try:
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+
+            router = ModelRouter(empire_id)
+
+            for domain in lieutenant_domains[:3]:  # Cap at 3 to control costs
+                lt_name, lt_focus = DOMAIN_ROLES.get(domain, (domain.title(), domain))
+
+                lt_prompt = (
+                    f"You are {lt_name}, Empire's specialist in {lt_focus}.\n\n"
+                    f"Research findings on '{topic}':\n{raw_synthesis[:3000]}\n\n"
+                    f"From your domain perspective ({domain}), provide:\n"
+                    f"1. What stands out as most significant?\n"
+                    f"2. What's missing or needs deeper investigation?\n"
+                    f"3. How does this connect to your domain?\n\n"
+                    f"Be concise (3-5 sentences max)."
+                )
+
+                try:
+                    lt_response = router.execute(
+                        LLMRequest(
+                            messages=[LLMMessage.user(lt_prompt)],
+                            max_tokens=300,
+                            temperature=0.3,
+                        ),
+                        TaskMetadata(task_type="analysis", complexity="moderate"),
+                    )
+                    lieutenant_insights.append({
+                        "lieutenant": lt_name,
+                        "domain": domain,
+                        "perspective": lt_response.content,
+                    })
+                    result["research_cost"] += lt_response.cost_usd
+                except Exception as e:
+                    logger.debug("Lieutenant %s perspective failed: %s", domain, e)
+
+        except Exception as e:
+            logger.debug("Lieutenant perspectives failed: %s", e)
+
+    result["lieutenant_perspectives"] = lieutenant_insights
+
+    # ── 3. Final synthesis with all inputs ──────────────────────────
+    try:
+        from llm.router import ModelRouter, TaskMetadata
+        from llm.base import LLMRequest, LLMMessage
+
+        router = ModelRouter(empire_id)
+
+        synthesis_parts = [f"## Research Findings\n{raw_synthesis[:4000]}"]
+
+        if prior_knowledge and build_on_existing:
+            synthesis_parts.append(f"\n## Empire's Prior Knowledge\n{prior_knowledge[:1500]}")
+
+        if lieutenant_insights:
+            lt_section = "\n## Lieutenant Perspectives\n"
+            for lt in lieutenant_insights:
+                lt_section += f"\n**{lt['lieutenant']}** ({lt['domain']}):\n{lt['perspective']}\n"
+            synthesis_parts.append(lt_section)
+
+        combined = "\n".join(synthesis_parts)
+
+        final_prompt = (
+            f"You are Empire's Chief of Staff. Synthesize all inputs about '{topic}' "
+            f"into a final intelligence brief.\n\n"
+            f"Structure:\n"
+            f"1. **Executive Summary** (2-3 sentences)\n"
+            f"2. **Key Findings** (bullet points)\n"
+            f"3. **Lieutenant Insights** (what the specialists flagged)\n"
+            f"4. **Knowledge Gaps** (what to investigate next)\n"
+            f"5. **Strategic Implications** (what this means for AI)\n\n"
+            f"Inputs:\n{combined[:8000]}"
+        )
+
+        final_response = router.execute(
+            LLMRequest(
+                messages=[LLMMessage.user(final_prompt)],
+                max_tokens=1500,
+                temperature=0.3,
+            ),
+            TaskMetadata(task_type="synthesis", complexity="complex"),
+        )
+
+        result["synthesis"] = final_response.content
+        result["research_cost"] += final_response.cost_usd
+
+        # ── 4. Store the compounded knowledge ───────────────────────
+        try:
+            from core.memory.manager import MemoryManager
+            mm = MemoryManager(empire_id)
+            mm.store(
+                content=f"God Panel Research: {topic}\n\n{final_response.content}",
+                memory_type="semantic",
+                title=f"Research: {topic[:60]}",
+                category="god_panel_research",
+                importance=0.85,
+                tags=["god_panel", "research", "synthesis"],
+                source_type="god_panel",
+                metadata={
+                    "topic": topic,
+                    "lieutenants_consulted": [lt["domain"] for lt in lieutenant_insights],
+                    "had_prior_knowledge": bool(prior_knowledge),
+                },
+            )
+        except Exception as e:
+            logger.debug("Failed to store God Panel research memory: %s", e)
+
+    except Exception as e:
+        logger.warning("Final synthesis failed: %s", e)
+        result["synthesis"] = raw_synthesis[:2000]
+
+    return result
 
 
 @god_panel_bp.route("/network/status")

@@ -74,6 +74,16 @@ class OpenAIClient(LLMClient):
         start_time = time.time()
         last_error = None
 
+        # Rate limiter enforcement — wait if needed before making request
+        estimated_tokens = sum(len(m.get("content", "")) // 4 for m in messages) + request.max_tokens
+        while not self._rate_limiter.can_proceed(estimated_tokens):
+            wait = self._rate_limiter.wait_time()
+            if wait > 0:
+                logger.debug("Rate limit backpressure: waiting %.1fs", wait)
+                time.sleep(min(wait, 5.0))
+            else:
+                break
+
         for attempt in range(3):
             try:
                 response = self.client.chat.completions.create(**kwargs)
