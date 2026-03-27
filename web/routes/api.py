@@ -4,11 +4,37 @@ from __future__ import annotations
 
 import logging
 import time
+import json
+import urllib.request
 from flask import Blueprint, jsonify, request, current_app
 from web.middleware.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__)
+
+
+def _dbg_emit(run_id: str, hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "b41917",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        req = urllib.request.Request(
+            "http://127.0.0.1:7339/ingest/2b050dc4-4b68-4382-a7fb-1f2a2fa0d88e",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Debug-Session-Id": "b41917"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=1.0).read()
+    except Exception:
+        pass
+    # #endregion
 
 
 def _get_json_or_400() -> dict:
@@ -26,6 +52,13 @@ def _get_json_or_400() -> dict:
 def get_empire():
     """Get current empire info."""
     empire_id = current_app.config.get("EMPIRE_ID", "")
+    _dbg_emit(
+        run_id="runtime-3",
+        hypothesis_id="H7",
+        location="web/routes/api.py:get_empire",
+        message="api empire endpoint hit",
+        data={"empire_id": empire_id},
+    )
     # #region agent log
     try:
         import json as _json, time as _time, os as _os
@@ -177,11 +210,25 @@ def api_execute_directive(directive_id: str):
     empire_id = current_app.config.get("EMPIRE_ID", "")
     app = current_app._get_current_object()
     import threading
+    _dbg_emit(
+        run_id="runtime-3",
+        hypothesis_id="H10",
+        location="web/routes/api.py:api_execute_directive:entry",
+        message="execute directive endpoint hit",
+        data={"directive_id": directive_id, "empire_id": empire_id},
+    )
 
     def run_directive(app_ref, eid, did):
         with app_ref.app_context():
             from core.directives.manager import DirectiveManager
             dm = DirectiveManager(eid)
+            _dbg_emit(
+                run_id="runtime-3",
+                hypothesis_id="H5",
+                location="web/routes/api.py:api_execute_directive:thread_start",
+                message="background directive thread started",
+                data={"directive_id": did, "empire_id": eid},
+            )
             # #region agent log
             try:
                 import json as _json, time as _time
@@ -201,6 +248,13 @@ def api_execute_directive(directive_id: str):
             # #endregion
             try:
                 dm.execute_directive(did)
+                _dbg_emit(
+                    run_id="runtime-3",
+                    hypothesis_id="H5",
+                    location="web/routes/api.py:api_execute_directive:thread_done",
+                    message="background directive thread completed",
+                    data={"directive_id": did},
+                )
                 # #region agent log
                 try:
                     import json as _json, time as _time
@@ -221,6 +275,13 @@ def api_execute_directive(directive_id: str):
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error("Directive execution failed: %s", e)
+                _dbg_emit(
+                    run_id="runtime-3",
+                    hypothesis_id="H5",
+                    location="web/routes/api.py:api_execute_directive:thread_error",
+                    message="background directive thread failed",
+                    data={"directive_id": did, "error": str(e)[:240]},
+                )
                 # #region agent log
                 try:
                     import json as _json, time as _time
@@ -412,6 +473,13 @@ def api_entity_neighbors(entity_name: str):
 def api_knowledge_ask():
     """Ask the knowledge graph a question."""
     question = request.args.get("q", "")
+    _dbg_emit(
+        run_id="runtime-3",
+        hypothesis_id="H10",
+        location="web/routes/api.py:api_knowledge_ask:entry",
+        message="knowledge ask endpoint hit",
+        data={"question_len": len(question)},
+    )
     if not question:
         return jsonify({"error": "Query parameter 'q' required"}), 400
     empire_id = current_app.config.get("EMPIRE_ID", "")
@@ -696,10 +764,10 @@ def api_memory_purge():
         try:
             # Find matching memories
             result = session.execute(text(
-                "SELECT id, title, content FROM memories "
+                "SELECT id, title, content FROM memory_entries "
                 "WHERE empire_id = :eid AND (title LIKE :pat OR content LIKE :pat)"
             ), {"eid": empire_id, "pat": f"%{pattern}%"})
-            matches = [{"id": r[0], "title": r[1][:80], "preview": r[2][:100]} for r in result]
+            matches = [{"id": r[0], "title": (r[1] or "")[:80], "preview": (r[2] or "")[:100]} for r in result]
 
             if dry_run:
                 return jsonify({"matches": len(matches), "entries": matches, "dry_run": True})
@@ -707,9 +775,11 @@ def api_memory_purge():
             # Delete matching memories
             if matches:
                 ids = [m["id"] for m in matches]
+                placeholders = ", ".join(f":id_{i}" for i in range(len(ids)))
+                params = {f"id_{i}": uid for i, uid in enumerate(ids)}
                 session.execute(text(
-                    "DELETE FROM memories WHERE id IN :ids"
-                ).bindparams(ids=tuple(ids)))
+                    f"DELETE FROM memory_entries WHERE id IN ({placeholders})"
+                ), params)
                 session.commit()
 
             return jsonify({"purged": len(matches), "entries": matches})
@@ -751,13 +821,15 @@ def api_knowledge_purge():
 
             if matches:
                 ids = [m["id"] for m in matches]
+                placeholders = ", ".join(f":id_{i}" for i in range(len(ids)))
+                params = {f"id_{i}": uid for i, uid in enumerate(ids)}
                 # Delete relations first (FK)
                 session.execute(text(
-                    "DELETE FROM knowledge_relations WHERE source_entity_id IN :ids OR target_entity_id IN :ids"
-                ).bindparams(ids=tuple(ids)))
+                    f"DELETE FROM knowledge_relations WHERE source_entity_id IN ({placeholders}) OR target_entity_id IN ({placeholders})"
+                ), params)
                 session.execute(text(
-                    "DELETE FROM knowledge_entities WHERE id IN :ids"
-                ).bindparams(ids=tuple(ids)))
+                    f"DELETE FROM knowledge_entities WHERE id IN ({placeholders})"
+                ), params)
                 session.commit()
 
             return jsonify({"purged": len(matches), "entities": matches})
