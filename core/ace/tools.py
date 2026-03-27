@@ -226,6 +226,64 @@ class ToolRegistry:
             requires_empire_id=True,
         ))
 
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
+                name="search_github",
+                description="Search GitHub for repositories, code, or topics. Great for finding open-source projects, implementations, and trending repos.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "search_type": {
+                            "type": "string",
+                            "enum": ["repositories", "code", "topics"],
+                            "description": "Type of search (default: repositories)",
+                            "default": "repositories",
+                        },
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                        "sort": {
+                            "type": "string",
+                            "enum": ["stars", "forks", "updated", "best-match"],
+                            "description": "Sort order (default: best-match)",
+                            "default": "best-match",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_search_github,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
+                name="search_huggingface",
+                description="Search HuggingFace for models, datasets, and spaces. Great for finding pre-trained models, benchmarks, and ML datasets.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "search_type": {
+                            "type": "string",
+                            "enum": ["models", "datasets", "spaces"],
+                            "description": "Type of search (default: models)",
+                            "default": "models",
+                        },
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                        "sort": {
+                            "type": "string",
+                            "enum": ["downloads", "likes", "trending", "recent"],
+                            "description": "Sort order (default: downloads)",
+                            "default": "downloads",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_search_huggingface,
+            requires_empire_id=True,
+        ))
+
     def register(self, tool: ToolRegistration) -> None:
         """Register a tool."""
         self._tools[tool.definition.name] = tool
@@ -512,5 +570,53 @@ class ToolRegistry:
                 "domain": page.domain,
                 "word_count": page.word_count,
                 "url": url,
+            },
+        )
+
+    def _tool_search_github(self, args: dict) -> ToolResult:
+        """Handler for search_github tool — searches GitHub repos, code, topics."""
+        from core.search.github import GitHubSearcher
+        searcher = GitHubSearcher(self.empire_id)
+
+        query = args.get("query", "")
+        search_type = args.get("search_type", "repositories")
+        max_results = min(args.get("max_results", 5), 10)
+        sort = args.get("sort", "best-match")
+
+        result = searcher.search(query, search_type=search_type, max_results=max_results, sort=sort)
+
+        if not result.get("found"):
+            return ToolResult(tool_name="search_github", output=f"No GitHub results for: {query}")
+
+        return ToolResult(
+            tool_name="search_github",
+            output=result.get("summary", ""),
+            data={
+                "result_count": result.get("result_count", 0),
+                "stored_entities": result.get("stored_entities", 0),
+            },
+        )
+
+    def _tool_search_huggingface(self, args: dict) -> ToolResult:
+        """Handler for search_huggingface tool — searches HF models, datasets, spaces."""
+        from core.search.huggingface import HuggingFaceSearcher
+        searcher = HuggingFaceSearcher(self.empire_id)
+
+        query = args.get("query", "")
+        search_type = args.get("search_type", "models")
+        max_results = min(args.get("max_results", 5), 10)
+        sort = args.get("sort", "downloads")
+
+        result = searcher.search(query, search_type=search_type, max_results=max_results, sort=sort)
+
+        if not result.get("found"):
+            return ToolResult(tool_name="search_huggingface", output=f"No HuggingFace results for: {query}")
+
+        return ToolResult(
+            tool_name="search_huggingface",
+            output=result.get("summary", ""),
+            data={
+                "result_count": result.get("result_count", 0),
+                "stored_entities": result.get("stored_entities", 0),
             },
         )
