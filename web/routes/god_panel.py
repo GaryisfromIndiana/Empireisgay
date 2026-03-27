@@ -590,25 +590,29 @@ def trigger_autoresearch():
     command_id = str(uuid.uuid4())[:12]
     _track_command(command_id, "Autonomous gap research", "AUTORESEARCH", "knowledge gaps")
 
+    max_questions = min(rounds * 2, 10)
+
     app = current_app._get_current_object()
-    def _run(app_ref, cmd_id, eid, pri):
+    def _run(app_ref, cmd_id, eid, max_q):
         with app_ref.app_context():
             _update_command_status(cmd_id, "running")
             try:
-                result = _execute_autonomous_gap_research(eid, pri)
-                _complete_command(cmd_id, result)
+                from core.research.autoresearcher import AutoResearcher
+                researcher = AutoResearcher(eid)
+                result = researcher.run_cycle(max_questions=max_q)
+                _complete_command(cmd_id, result.to_dict())
             except Exception as e:
                 logger.error("Autoresearch failed: %s", e)
                 _complete_command(cmd_id, error=str(e))
 
-    threading.Thread(target=_run, args=(app, command_id, empire_id, rounds), daemon=True).start()
+    threading.Thread(target=_run, args=(app, command_id, empire_id, max_questions), daemon=True).start()
 
     return jsonify({
         "status": "accepted",
         "command_id": command_id,
-        "rounds": rounds,
+        "max_questions": max_questions,
         "poll_url": f"/god/command/{command_id}/status",
-        "message": f"Empire is autonomously researching knowledge gaps ({rounds} rounds)",
+        "message": f"AutoResearcher running: gaps → questions → search → extract → synthesize ({max_questions} questions max)",
     })
 
 
