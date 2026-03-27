@@ -228,6 +228,80 @@ class ToolRegistry:
 
         self.register(ToolRegistration(
             definition=ToolDefinition(
+                name="search_hackernews",
+                description="Search Hacker News for tech discussions, Show HN launches, and community insights. Best for early trend detection and technical debates.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                        "sort": {
+                            "type": "string",
+                            "enum": ["relevance", "date"],
+                            "description": "Sort by relevance or most recent (default: relevance)",
+                            "default": "relevance",
+                        },
+                        "time_filter": {
+                            "type": "string",
+                            "enum": ["day", "week", "month", "year", "all"],
+                            "description": "Time filter (default: year)",
+                            "default": "year",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_search_hackernews,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
+                name="search_papers",
+                description="Search Semantic Scholar for academic papers with citation counts, influence scores, and abstracts. Better than web search for finding specific research.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                        "year_filter": {
+                            "type": "string",
+                            "description": "Year range, e.g. '2024-2025' or '2023-' (optional)",
+                            "default": "",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_search_papers,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
+                name="search_papers_with_code",
+                description="Search Papers With Code for papers that have GitHub implementations and SOTA benchmark results. Bridges theory to working code.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                        "search_type": {
+                            "type": "string",
+                            "enum": ["papers", "methods", "tasks"],
+                            "description": "Search papers, ML methods, or benchmark tasks (default: papers)",
+                            "default": "papers",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_search_papers_with_code,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
                 name="search_reddit",
                 description="Search Reddit for discussions, opinions, and community insights. Great for finding real-world experiences, comparisons, and debates about AI topics.",
                 parameters={
@@ -604,6 +678,76 @@ class ToolRegistry:
                 "domain": page.domain,
                 "word_count": page.word_count,
                 "url": url,
+            },
+        )
+
+    def _tool_search_hackernews(self, args: dict) -> ToolResult:
+        """Handler for search_hackernews tool."""
+        from core.search.hackernews import HackerNewsSearcher
+        searcher = HackerNewsSearcher(self.empire_id)
+
+        query = args.get("query", "")
+        max_results = min(args.get("max_results", 5), 10)
+        sort = args.get("sort", "relevance")
+        time_filter = args.get("time_filter", "year")
+
+        result = searcher.search(query, max_results=max_results, sort=sort, time_filter=time_filter)
+
+        if not result.get("found"):
+            return ToolResult(tool_name="search_hackernews", output=f"No HN results for: {query}")
+
+        return ToolResult(
+            tool_name="search_hackernews",
+            output=result.get("summary", ""),
+            data={
+                "result_count": result.get("result_count", 0),
+                "stored_entities": result.get("stored_entities", 0),
+            },
+        )
+
+    def _tool_search_papers(self, args: dict) -> ToolResult:
+        """Handler for search_papers tool — Semantic Scholar."""
+        from core.search.semantic_scholar import SemanticScholarSearcher
+        searcher = SemanticScholarSearcher(self.empire_id)
+
+        query = args.get("query", "")
+        max_results = min(args.get("max_results", 5), 10)
+        year_filter = args.get("year_filter", "")
+
+        result = searcher.search(query, max_results=max_results, year_filter=year_filter)
+
+        if not result.get("found"):
+            return ToolResult(tool_name="search_papers", output=f"No papers found for: {query}")
+
+        return ToolResult(
+            tool_name="search_papers",
+            output=result.get("summary", ""),
+            data={
+                "result_count": result.get("result_count", 0),
+                "stored_entities": result.get("stored_entities", 0),
+            },
+        )
+
+    def _tool_search_papers_with_code(self, args: dict) -> ToolResult:
+        """Handler for search_papers_with_code tool."""
+        from core.search.papers_with_code import PapersWithCodeSearcher
+        searcher = PapersWithCodeSearcher(self.empire_id)
+
+        query = args.get("query", "")
+        max_results = min(args.get("max_results", 5), 10)
+        search_type = args.get("search_type", "papers")
+
+        result = searcher.search(query, max_results=max_results, search_type=search_type)
+
+        if not result.get("found"):
+            return ToolResult(tool_name="search_papers_with_code", output=f"No PWC results for: {query}")
+
+        return ToolResult(
+            tool_name="search_papers_with_code",
+            output=result.get("summary", ""),
+            data={
+                "result_count": result.get("result_count", 0),
+                "stored_entities": result.get("stored_entities", 0),
             },
         )
 
