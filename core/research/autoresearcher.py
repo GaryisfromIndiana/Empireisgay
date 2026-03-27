@@ -481,23 +481,23 @@ Rules:
         q: ResearchQuestion = question
         stored = 0
 
-        from core.memory.manager import MemoryManager
-        mm = MemoryManager(self.empire_id)
+        # Use BiTemporalMemory for auto-supersession — new findings replace
+        # outdated ones instead of piling up and decaying to zero.
+        from core.memory.bitemporal import BiTemporalMemory
+        bt = BiTemporalMemory(self.empire_id)
 
         for finding in findings[:8]:
             try:
-                mm.store(
+                bt.store_intelligent(
                     content=(
                         f"{finding.title}\n\n{finding.content[:1500]}\n\n"
                         f"Source: {finding.source_name} ({finding.source_url})"
                     ),
-                    memory_type="semantic",
-                    lieutenant_id=q.lieutenant_id or None,
                     title=f"Research: {finding.title[:80]}",
                     category="auto_research",
                     importance=finding.importance,
                     tags=["auto_research", q.domain, q.strategy],
-                    source_type="autonomous",
+                    lieutenant_id=q.lieutenant_id or "",
                 )
                 stored += 1
             except Exception as exc:

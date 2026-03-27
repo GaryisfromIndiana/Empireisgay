@@ -167,7 +167,7 @@ class MemoryConsolidator:
         candidates = repo.get_promotion_candidates(
             empire_id=self.empire_id,
             min_importance=0.65,
-            min_access_count=2,
+            min_access_count=1,
         )
 
         promotions = []

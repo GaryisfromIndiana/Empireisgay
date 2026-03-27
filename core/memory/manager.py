@@ -68,14 +68,23 @@ class MemoryManager:
         return MemoryRepository(session)
 
     @contextmanager
-    def _repo_scope(self) -> Generator[Any, None, None]:
-        """Yield a repository with guaranteed session cleanup."""
+    def _repo_scope(self, commit: bool = False) -> Generator[Any, None, None]:
+        """Yield a repository with guaranteed session cleanup.
+
+        Args:
+            commit: If True, commit the session on clean exit (for writes like refresh).
+        """
         from db.engine import get_session
         from db.repositories.memory import MemoryRepository
 
         session = get_session()
         try:
             yield MemoryRepository(session)
+            if commit:
+                session.commit()
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
 
@@ -175,7 +184,7 @@ class MemoryManager:
         Returns:
             List of memory entries as dicts.
         """
-        with self._repo_scope() as repo:
+        with self._repo_scope(commit=refresh_on_access) as repo:
             if query:
                 entries = repo.search(
                     query=query,
@@ -197,9 +206,8 @@ class MemoryManager:
                 try:
                     for entry in entries:
                         entry.refresh()
-                    repo.flush()
                 except Exception:
-                    repo.rollback()
+                    logger.debug("Memory refresh failed, continuing with read-only recall")
 
             return [
                 {
@@ -230,13 +238,12 @@ class MemoryManager:
         Returns:
             MemoryContext organized by tier.
         """
-        with self._repo_scope() as repo:
+        with self._repo_scope(commit=True) as repo:
             memories_by_type = repo.get_for_context(
                 empire_id=self.empire_id,
                 lieutenant_id=lieutenant_id,
                 token_budget=token_budget,
             )
-            repo.commit()
 
             context = MemoryContext()
             for mtype, entries in memories_by_type.items():
@@ -264,11 +271,11 @@ class MemoryManager:
         Returns:
             Number of memories promoted.
         """
-        with self._repo_scope() as repo:
+        with self._repo_scope(commit=True) as repo:
             candidates = repo.get_promotion_candidates(
                 empire_id=self.empire_id,
-                min_importance=0.7,
-                min_access_count=3,
+                min_importance=0.65,
+                min_access_count=1,
             )
 
             promoted = 0
@@ -291,8 +298,6 @@ class MemoryManager:
 
                 repo.mark_promoted(entry.id, "experiential")
                 promoted += 1
-
-            repo.commit()
             logger.info("Consolidated %d episodic memories to experiential", promoted)
             return promoted
 
@@ -328,28 +333,24 @@ class MemoryManager:
                 entries = list(session.execute(stmt).scalars().all())
 
                 for entry in entries:
-                    actual_rate = rate
-
-                    # Type-based decay multiplier
-                    if entry.memory_type == "episodic":
-                        actual_rate *= 2.0
-                    elif entry.memory_type == "semantic":
-                        actual_rate *= 0.5
-                    elif entry.memory_type == "design":
-                        actual_rate *= 0.3  # Design patterns are durable
-
-                    # Age-based decay multiplier
-                    if entry.created_at:
-                        age_days = (now - entry.created_at).total_seconds() / 86400
-                        if age_days > 90:
-                            actual_rate *= 2.0
-                        elif age_days > 30:
-                            actual_rate *= 1.5
-
-                    # Superseded facts decay much faster
                     meta = entry.metadata_json or {}
-                    if isinstance(meta, dict) and meta.get("superseded_at"):
-                        actual_rate *= 3.0
+                    is_superseded = isinstance(meta, dict) and meta.get("superseded_at")
+
+                    # Superseded facts decay — they've been replaced by newer info
+                    if is_superseded:
+                        actual_rate = rate * 5.0
+                    elif entry.memory_type == "episodic":
+                        # Episodic: raw event logs fade over time (the only type that should)
+                        actual_rate = rate * 1.0
+                        if entry.created_at:
+                            age_days = (now - entry.created_at).total_seconds() / 86400
+                            if age_days > 30:
+                                actual_rate *= 1.5
+                    else:
+                        # Semantic, experiential, design: knowledge doesn't expire.
+                        # It gets replaced via supersession, not time decay.
+                        # Skip decay entirely for non-superseded knowledge.
+                        continue
 
                     # Apply decay
                     entry.decay_factor = max(0.0, entry.decay_factor - actual_rate)
@@ -371,12 +372,10 @@ class MemoryManager:
         Returns:
             Cleanup stats.
         """
-        with self._repo_scope() as repo:
+        with self._repo_scope(commit=True) as repo:
             expired = repo.cleanup_expired(self.empire_id)
             low_importance = repo.cleanup_low_importance(self.empire_id, threshold=importance_threshold)
             old_episodic = repo.cleanup_old_episodic(self.empire_id, days=30)
-
-            repo.commit()
 
             stats = {
                 "expired_removed": expired,

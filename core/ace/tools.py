@@ -490,27 +490,28 @@ class ToolRegistry:
 
     def _tool_store_finding(self, args: dict) -> ToolResult:
         """Handler for store_finding tool."""
-        from core.memory.manager import MemoryManager
-        mm = MemoryManager(self.empire_id)
-
         content = args.get("content", "")
         importance = args.get("importance", 0.6)
         category = args.get("category", "finding")
 
-        entry = mm.store(
+        # Use BiTemporalMemory so new findings supersede outdated ones
+        # instead of piling up and decaying to zero.
+        from core.memory.bitemporal import BiTemporalMemory
+        bt = BiTemporalMemory(self.empire_id)
+
+        fact = bt.store_intelligent(
             content=content,
-            memory_type="semantic",
-            lieutenant_id=self.lieutenant_id,
             title=f"Finding: {content[:80]}",
             category=category,
             importance=importance,
             tags=["finding", "tool_generated"],
+            lieutenant_id=self.lieutenant_id,
         )
 
         return ToolResult(
             tool_name="store_finding",
             output=f"Finding stored successfully (importance: {importance})",
-            data=entry,
+            data={"id": fact.id, "title": fact.title, "type": "semantic"},
         )
 
     def _tool_check_previous_work(self, args: dict) -> ToolResult:
