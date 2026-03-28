@@ -367,6 +367,63 @@ class ToolRegistry:
 
         self.register(ToolRegistration(
             definition=ToolDefinition(
+                name="tavily_search",
+                description="AI-optimized web search using Tavily. Returns extracted content and AI-generated answers, not just links. Best general search tool available.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                        "search_depth": {
+                            "type": "string",
+                            "enum": ["basic", "advanced"],
+                            "description": "basic=fast, advanced=deeper content extraction",
+                            "default": "basic",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_tavily_search,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
+                name="tavily_news",
+                description="Search for recent news using Tavily. Returns AI-extracted article content with summaries.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "News search query"},
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_tavily_news,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
+                name="tavily_ai_search",
+                description="Deep search focused on AI/ML sources: arxiv, HuggingFace, GitHub, OpenAI, Anthropic, DeepMind, Meta AI. Use this for AI research topics.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "AI research query"},
+                        "max_results": {"type": "integer", "description": "Maximum results (max 10)", "default": 5},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            handler=self._tool_tavily_ai_search,
+            requires_empire_id=True,
+        ))
+
+        self.register(ToolRegistration(
+            definition=ToolDefinition(
                 name="search_huggingface",
                 description="Search HuggingFace for models, datasets, and spaces. Great for finding pre-trained models, benchmarks, and ML datasets.",
                 parameters={
@@ -831,6 +888,92 @@ class ToolRegistry:
                 "result_count": result.get("result_count", 0),
                 "stored_entities": result.get("stored_entities", 0),
             },
+        )
+
+    # ── Tavily search tools ─────────────────────────────────────────
+
+    def _tool_tavily_search(self, args: dict) -> ToolResult:
+        """Handler for tavily_search — AI-optimized web search."""
+        from core.search.tavily import TavilySearcher
+        searcher = TavilySearcher(self.empire_id)
+
+        if not searcher.available:
+            # Fall back to DuckDuckGo
+            return self._tool_web_search(args)
+
+        query = args.get("query", "")
+        max_results = min(args.get("max_results", 5), 10)
+        search_depth = args.get("search_depth", "basic")
+
+        result = searcher.search_and_format(query, max_results=max_results, search_depth=search_depth)
+
+        if not result.get("found"):
+            return ToolResult(tool_name="tavily_search", output=f"No results for: {query}")
+
+        return ToolResult(
+            tool_name="tavily_search",
+            output=result.get("summary", ""),
+            data={
+                "result_count": result.get("result_count", 0),
+                "answer": result.get("answer", ""),
+                "search_time_ms": result.get("search_time_ms", 0),
+            },
+        )
+
+    def _tool_tavily_news(self, args: dict) -> ToolResult:
+        """Handler for tavily_news — AI-optimized news search."""
+        from core.search.tavily import TavilySearcher
+        searcher = TavilySearcher(self.empire_id)
+
+        if not searcher.available:
+            return self._tool_search_news(args)
+
+        query = args.get("query", "")
+        max_results = min(args.get("max_results", 5), 10)
+
+        response = searcher.search_news(query, max_results=max_results)
+
+        if not response.results:
+            return ToolResult(tool_name="tavily_news", output=f"No news for: {query}")
+
+        parts = []
+        if response.answer:
+            parts.append(f"**Summary:** {response.answer}\n")
+        for r in response.results:
+            parts.append(f"**{r.title}**\n{r.content[:300]}\n_Source: {r.url}_")
+
+        return ToolResult(
+            tool_name="tavily_news",
+            output="\n\n".join(parts),
+            data={"result_count": len(response.results)},
+        )
+
+    def _tool_tavily_ai_search(self, args: dict) -> ToolResult:
+        """Handler for tavily_ai_search — deep search across AI sources."""
+        from core.search.tavily import TavilySearcher
+        searcher = TavilySearcher(self.empire_id)
+
+        if not searcher.available:
+            return self._tool_web_search(args)
+
+        query = args.get("query", "")
+        max_results = min(args.get("max_results", 5), 10)
+
+        response = searcher.search_ai(query, max_results=max_results)
+
+        if not response.results:
+            return ToolResult(tool_name="tavily_ai_search", output=f"No AI results for: {query}")
+
+        parts = []
+        if response.answer:
+            parts.append(f"**AI Summary:** {response.answer}\n")
+        for r in response.results:
+            parts.append(f"**{r.title}** (score: {r.score:.2f})\n{r.content[:400]}\n_Source: {r.url}_")
+
+        return ToolResult(
+            tool_name="tavily_ai_search",
+            output="\n\n".join(parts),
+            data={"result_count": len(response.results)},
         )
 
     # ── MCP tool integration ──────────────────────────────────────────

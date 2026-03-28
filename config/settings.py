@@ -271,6 +271,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     google_api_key: str = ""
     xai_api_key: str = ""
+    tavily_api_key: str = ""
 
     # ── Flask ──────────────────────────────────────────────────────────
     flask_secret_key: str = "change-me-to-random-string"
