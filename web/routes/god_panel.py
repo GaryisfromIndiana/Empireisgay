@@ -43,8 +43,8 @@ def _track_command(command_id: str, command: str, action: str, topic: str) -> di
     with _command_lock:
         _command_cache[command_id] = entry
         if len(_command_cache) > _MAX_CACHED:
-            oldest = sorted(_command_cache.keys(), key=lambda k: _command_cache[k]["started_at"])
-            for k in oldest[:len(_command_cache) - _MAX_CACHED]:
+            excess = len(_command_cache) - _MAX_CACHED
+            for k in list(_command_cache.keys())[:excess]:
                 del _command_cache[k]
     _persist_command(entry)
     return entry

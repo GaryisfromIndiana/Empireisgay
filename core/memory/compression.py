@@ -266,6 +266,7 @@ Respond as JSON:
             # Archive the original memories (reduce importance dramatically)
             self._archive_originals(cluster.memories)
 
+            cluster.total_words = sum(len(m.get("content", "").split()) for m in cluster.memories)
             summary_words = len(summary_content.split())
             logger.info(
                 "Compressed %d memories → '%s' (%d words → %d words)",

@@ -127,10 +127,14 @@ class MemoryConsolidator:
             duplicates = []
             for key, group_memories in groups.items():
                 if len(group_memories) > 1:
+                    words_a = set(group_memories[0].content.lower().split()[:100])
+                    words_b = set(group_memories[-1].content.lower().split()[:100])
+                    union = len(words_a | words_b)
+                    similarity = len(words_a & words_b) / union if union else 0.0
                     duplicates.append(DuplicateGroup(
                         memory_ids=[m.id for m in group_memories],
                         titles=[m.title or "" for m in group_memories],
-                        similarity=0.9,
+                        similarity=similarity,
                         suggested_merge_content=group_memories[0].content or "",
                     ))
 

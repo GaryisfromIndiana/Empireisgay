@@ -267,6 +267,12 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
         Returns:
             List of {entity, relation, depth} dicts.
         """
+        # Resolve empire_id from the starting entity to prevent cross-empire leaks
+        start_entity = self.get(entity_id)
+        if not start_entity:
+            return []
+        empire_id = start_entity.empire_id
+
         visited = {entity_id}
         results = []
         current_ids = [entity_id]
@@ -293,10 +299,17 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
                         next_ids.append(neighbor_id)
                         neighbor_ids_to_fetch.append((neighbor_id, rel, depth))
 
-            # Batch fetch all neighbors at this depth to avoid N+1 queries
+            # Batch fetch all neighbors at this depth, filtered by empire_id
             if neighbor_ids_to_fetch:
                 neighbor_ids = [nid for nid, _, _ in neighbor_ids_to_fetch]
-                neighbors = self.get_many(neighbor_ids)
+                stmt = (
+                    select(KnowledgeEntity)
+                    .where(and_(
+                        KnowledgeEntity.id.in_(neighbor_ids),
+                        KnowledgeEntity.empire_id == empire_id,
+                    ))
+                )
+                neighbors = list(self.session.execute(stmt).scalars().all())
                 neighbors_by_id = {n.id: n for n in neighbors}
 
                 for neighbor_id, rel, depth_val in neighbor_ids_to_fetch:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -132,6 +133,9 @@ class ModelRouter:
     current model health, and historical performance data.
     """
 
+    _global_provider_outage_until: dict[str, float] = {}
+    _global_outage_lock = threading.Lock()
+
     def __init__(self, empire_id: str = ""):
         if not empire_id:
             try:
@@ -237,6 +241,9 @@ class ModelRouter:
             score = self._score_candidate(key, config, metadata)
             scored.append((key, config, score))
 
+        if not scored:
+            raise ValueError("No models available for routing")
+
         # Sort by score (highest first)
         scored.sort(key=lambda x: x[2], reverse=True)
 
@@ -321,6 +328,11 @@ class ModelRouter:
         circuit = get_circuit(f"llm:{decision.provider}")
 
         try:
+            with self._global_outage_lock:
+                outage_until = self._global_provider_outage_until.get(decision.provider, 0.0)
+            if outage_until > time.time():
+                raise ConnectionError(f"Provider {decision.provider} temporarily unavailable")
+
             if not circuit.allow_request():
                 raise CircuitOpenError(
                     f"Circuit for {decision.provider} is OPEN — skipping to fallback"
@@ -352,6 +364,20 @@ class ModelRouter:
             self._update_health(decision.model_key, success=False)
             logger.warning("Primary model %s failed: %s", decision.model_key, e)
 
+            # Fail fast for network connectivity errors on same-provider fallbacks.
+            # Runtime evidence shows repeated Anthropic->Anthropic retries produce only APIConnectionError.
+            is_connection_error = type(e).__name__ in {"APIConnectionError", "ConnectionError"}
+            same_provider_fallback = (
+                decision.fallback_model is not None
+                and MODEL_CATALOG.get(decision.fallback_model) is not None
+                and MODEL_CATALOG[decision.fallback_model].provider == decision.provider
+            )
+            if is_connection_error:
+                with self._global_outage_lock:
+                    self._global_provider_outage_until[decision.provider] = time.time() + 30.0
+            if is_connection_error and same_provider_fallback:
+                raise
+
             # Try fallback
             if decision.fallback_model:
                 fallback_config = MODEL_CATALOG[decision.fallback_model]
@@ -367,19 +393,17 @@ class ModelRouter:
                     self._update_health(decision.fallback_model, success=False)
                     logger.warning("Fallback model %s also failed: %s", decision.fallback_model, e2)
 
-            # Last resort: try any available Anthropic model
+            # Last resort: try any available model from all providers
             for key, config in MODEL_CATALOG.items():
-                if config.provider != "anthropic" or key == decision.model_key:
-                    continue
-                if key == decision.fallback_model:
+                if key == decision.model_key or key == decision.fallback_model:
                     continue
                 if config.provider not in self._clients:
                     continue
                 try:
                     request.model = config.model_id
-                    response = self._clients["anthropic"].complete(request)
+                    response = self._clients[config.provider].complete(request)
                     logger.info("Last-resort fallback to %s succeeded", key)
-                    self._record_cost(response, key, "anthropic")
+                    self._record_cost(response, key, config.provider)
                     return response
                 except Exception:
                     continue

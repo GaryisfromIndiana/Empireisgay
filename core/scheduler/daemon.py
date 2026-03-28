@@ -312,9 +312,10 @@ class SchedulerDaemon:
         # Only quick jobs (health_check, budget_check, directive_check) run on first tick
         now = datetime.now(timezone.utc)
         immediate_jobs = {"health_check", "budget_check", "directive_check"}
-        for job in self._jobs.values():
-            if job.name not in immediate_jobs:
-                job.last_run = now  # Will wait full interval before first run
+        with self._lock:
+            for job in self._jobs.values():
+                if job.name not in immediate_jobs:
+                    job.last_run = now  # Will wait full interval before first run
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="empire-scheduler")
         self._thread.start()
@@ -420,14 +421,15 @@ class SchedulerDaemon:
                         logger.warning("Job %s disabled after %d consecutive errors", job.name, job.consecutive_errors)
 
             # Auto-re-enable disabled jobs after 10 ticks (~50 min)
-            for job in self._jobs.values():
-                if not job.enabled:
-                    meta = getattr(job, "metadata_json", None) or {}
-                    disabled_at = meta.get("disabled_at_tick", 0)
-                    if self._tick_count - disabled_at >= 10:
-                        job.enabled = True
-                        job.consecutive_errors = 0
-                        logger.info("Job %s auto-re-enabled after cooldown", job.name)
+            with self._lock:
+                for job in self._jobs.values():
+                    if not job.enabled:
+                        meta = getattr(job, "metadata_json", None) or {}
+                        disabled_at = meta.get("disabled_at_tick", 0)
+                        if self._tick_count - disabled_at >= 10:
+                            job.enabled = True
+                            job.consecutive_errors = 0
+                            logger.info("Job %s auto-re-enabled after cooldown", job.name)
 
         return executed
 

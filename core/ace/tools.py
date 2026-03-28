@@ -474,7 +474,10 @@ class ToolRegistry:
 
         output_parts = []
         for e in entities:
-            part = f"**{e.name}** ({e.entity_type}): {e.description[:200]}"
+            name = getattr(e, 'name', 'Unknown')
+            etype = getattr(e, 'entity_type', '')
+            desc = getattr(e, 'description', '') or ''
+            part = f"**{name}** ({etype}): {desc[:200]}"
             if include_neighbors:
                 neighbors = graph.get_neighbors(e.name, max_depth=1)
                 if neighbors:

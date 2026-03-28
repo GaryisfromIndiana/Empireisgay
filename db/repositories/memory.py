@@ -408,7 +408,6 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
             Dict of memory_type → list of memories.
         """
         char_budget = token_budget * chars_per_token
-        used_chars = 0
 
         result: dict[str, list[MemoryEntry]] = {
             "semantic": [],

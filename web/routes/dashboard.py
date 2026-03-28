@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from flask import Blueprint, render_template, jsonify, current_app
+from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +116,15 @@ def index():
                 # If this worker's daemon hasn't ticked yet, check DB for scheduler evidence
                 if not scheduler_info.get("total_ticks"):
                     try:
-                        from sqlalchemy import text
-                        tick_check = session.execute(text(
-                            "SELECT COUNT(*) FROM war_rooms WHERE created_at > datetime('now', '-1 hour')"
-                        )).scalar() or 0
-                        task_check = session.execute(text(
-                            "SELECT COUNT(*) FROM tasks WHERE created_at > datetime('now', '-1 hour')"
-                        )).scalar() or 0
+                        from datetime import datetime, timezone, timedelta
+                        from db.models import WarRoom, Task
+                        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+                        tick_check = session.query(func.count(WarRoom.id)).filter(
+                            WarRoom.created_at > one_hour_ago
+                        ).scalar() or 0
+                        task_check = session.query(func.count(Task.id)).filter(
+                            Task.created_at > one_hour_ago
+                        ).scalar() or 0
                         if tick_check or task_check:
                             scheduler_info["running"] = True
                             scheduler_info["note"] = "Activity detected (stats from another worker)"
@@ -258,9 +261,13 @@ def dashboard_stats():
                 research = mm.recall(query="research synthesis", memory_types=["semantic"], limit=5)
                 latest_research = [
                     {
-                        "title": getattr(r, "title", "") or getattr(r, "content", "")[:55],
-                        "content": getattr(r, "content", ""),
-                        "created_at": str(getattr(r, "created_at", "")),
+                        "title": getattr(r, "title", "") or (getattr(r, "content", "") or "")[:55],
+                        "content": getattr(r, "content", "") or "",
+                        "created_at": (
+                            getattr(r, "created_at", None).isoformat()
+                            if getattr(r, "created_at", None) is not None
+                            else ""
+                        ),
                     }
                     for r in research
                 ]
@@ -294,10 +301,12 @@ def dashboard_stats():
                     }
                 if not scheduler_info.get("total_ticks"):
                     try:
-                        from sqlalchemy import text
-                        task_check = session.execute(text(
-                            "SELECT COUNT(*) FROM tasks WHERE created_at > datetime('now', '-1 hour')"
-                        )).scalar() or 0
+                        from datetime import datetime, timezone, timedelta
+                        from db.models import Task
+                        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+                        task_check = session.query(func.count(Task.id)).filter(
+                            Task.created_at > one_hour_ago
+                        ).scalar() or 0
                         if task_check:
                             scheduler_info["running"] = True
                             scheduler_info["recent_tasks"] = task_check

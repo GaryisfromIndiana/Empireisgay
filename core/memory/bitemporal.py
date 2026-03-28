@@ -310,6 +310,7 @@ class BiTemporalMemory:
                 id=mem.get("id", ""),
                 content=mem.get("content", ""),
                 title=mem.get("title", ""),
+                memory_type=mem.get("type", "semantic"),
                 category=mem.get("category", ""),
                 valid_from=meta.get("valid_from"),
                 valid_to=meta.get("valid_to"),

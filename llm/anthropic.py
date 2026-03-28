@@ -78,14 +78,18 @@ class AnthropicClient(LLMClient):
 
         # Rate limiter enforcement — wait if needed before making request
         estimated_tokens = sum(len(m.content) // 4 for m in request.messages) + request.max_tokens
+        _rl_wait_total = 0.0
+        _rl_wait_loops = 0
         while not self._rate_limiter.can_proceed(estimated_tokens):
             wait = self._rate_limiter.wait_time()
             if wait > 0:
                 logger.debug("Rate limit backpressure: waiting %.1fs", wait)
-                time.sleep(min(wait, 5.0))
+                _sleep_for = min(wait, 5.0)
+                _rl_wait_total += _sleep_for
+                _rl_wait_loops += 1
+                time.sleep(_sleep_for)
             else:
                 break
-
         for attempt in range(5):
             try:
                 response = self.client.messages.create(**kwargs)
@@ -110,8 +114,12 @@ class AnthropicClient(LLMClient):
                 elif response.stop_reason == "max_tokens":
                     finish_reason = "length"
 
-                tokens_in = response.usage.input_tokens
-                tokens_out = response.usage.output_tokens
+                if response.usage:
+                    tokens_in = response.usage.input_tokens
+                    tokens_out = response.usage.output_tokens
+                else:
+                    tokens_in = 0
+                    tokens_out = 0
                 cost = self._calculate_cost(model, tokens_in, tokens_out)
 
                 llm_response = LLMResponse(

@@ -326,7 +326,7 @@ class AutoResearcher:
                         question_id=q.question_id,
                     ))
             except Exception as exc:
-                logger.debug("Search failed for '%s': %s", query[:60], exc)
+                logger.warning("Search failed for '%s': %s", query[:60], exc)
 
         return findings
 
@@ -355,7 +355,7 @@ class AutoResearcher:
                         question_id=finding.question_id,
                     ))
             except Exception as exc:
-                logger.debug("Scrape failed for %s: %s", finding.source_url, exc)
+                logger.warning("Scrape failed for %s: %s", finding.source_url, exc)
 
         return scraped
 

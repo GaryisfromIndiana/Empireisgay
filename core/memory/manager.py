@@ -122,6 +122,9 @@ class MemoryManager:
         Returns:
             Created memory entry as dict.
         """
+        importance = max(0.0, min(1.0, importance))
+        confidence = max(0.0, min(1.0, confidence))
+
         expires_at = None
         if expires_hours:
             from datetime import timedelta
@@ -384,6 +387,7 @@ class MemoryManager:
                     select(MemoryEntry)
                     .where(MemoryEntry.empire_id == self.empire_id)
                     .where(MemoryEntry.decay_factor > 0.0)
+                    .limit(500)
                 )
                 entries = list(session.execute(stmt).scalars().all())
 

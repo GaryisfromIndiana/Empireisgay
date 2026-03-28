@@ -547,8 +547,9 @@ class KnowledgeGraph:
                 scores = new_scores
 
             # Update importance scores in DB
+            max_score = max(scores.values()) if scores else 1.0
             for eid, score in scores.items():
-                repo.update_importance(eid, min(1.0, score * n))  # Normalize
+                repo.update_importance(eid, min(1.0, score / max_score))
 
             repo.commit()
             return scores
