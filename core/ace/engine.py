@@ -96,7 +96,7 @@ class TaskResult:
     error_log: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "task_id": self.task_id,
             "success": self.success,
             "content": self.content[:500],
@@ -106,6 +106,9 @@ class TaskResult:
             "execution_time": self.execution_time_seconds,
             "iterations": self.pipeline_iterations,
         }
+        if self.error:
+            d["error"] = self.error
+        return d
 
 
 @dataclass
@@ -231,6 +234,10 @@ class ACEEngine:
             result.cost_usd += execution.get("cost", 0.0)
             result.tokens_input += execution.get("tokens", 0)
             result.model_used = execution.get("model", "")
+
+            if execution.get("error"):
+                result.error = execution["error"]
+                result.error_log.append(f"Execution error: {execution['error']}")
 
             # ── Stage 3: Critic loop ───────────────────────────────────
             critic_failures = 0
