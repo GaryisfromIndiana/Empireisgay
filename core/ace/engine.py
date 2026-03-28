@@ -511,6 +511,13 @@ Call tools when you need real data — don't guess or hallucinate facts.
 
             self.router._record_cost(response, decision.model_key, decision.provider)
 
+            logger.info(
+                "Execution complete: content_len=%d, tool_calls=%d, cost=%.4f",
+                len(response.content),
+                len(response.tool_calls) if response.tool_calls else 0,
+                response.cost_usd,
+            )
+
             return {
                 "content": response.content,
                 "model": response.model,
@@ -519,7 +526,7 @@ Call tools when you need real data — don't guess or hallucinate facts.
                 "tool_calls_made": len(response.tool_calls) if response.tool_calls else 0,
             }
         except Exception as e:
-            logger.error("Execution failed: %s", e)
+            logger.exception("Execution failed: %s", e)
             return {"content": "", "error": str(e)}
 
     def _run_critic(

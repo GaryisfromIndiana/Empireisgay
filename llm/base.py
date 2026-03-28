@@ -286,6 +286,15 @@ class LLMClient(ABC):
             response = self.complete(req)
             final_response = response
 
+            logger.info(
+                "Tool loop round %d/%d: has_tool_calls=%s, content_len=%d, finish=%s, tools=%s",
+                round_num + 1, max_rounds,
+                response.has_tool_calls,
+                len(response.content),
+                response.finish_reason,
+                [tc.name for tc in response.tool_calls] if response.tool_calls else [],
+            )
+
             if not response.has_tool_calls or tool_executor is None:
                 break
 
@@ -302,8 +311,11 @@ class LLMClient(ABC):
             for tc in response.tool_calls:
                 try:
                     result = tool_executor(tc.name, tc.arguments)
-                    messages.append(LLMMessage.tool_result(tc.id, str(result), tc.name))
+                    result_str = str(result)
+                    logger.info("Tool %s returned %d chars", tc.name, len(result_str))
+                    messages.append(LLMMessage.tool_result(tc.id, result_str, tc.name))
                 except Exception as e:
+                    logger.error("Tool %s error: %s", tc.name, e)
                     messages.append(LLMMessage.tool_result(tc.id, f"Error: {e}", tc.name))
 
         # If the last response still had tool calls (hit max_rounds or loop
