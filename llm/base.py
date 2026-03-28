@@ -272,7 +272,7 @@ class LLMClient(ABC):
         messages = list(request.messages)
         final_response = None
 
-        for _ in range(max_rounds):
+        for round_num in range(max_rounds):
             req = LLMRequest(
                 messages=messages,
                 model=request.model,
@@ -305,6 +305,20 @@ class LLMClient(ABC):
                     messages.append(LLMMessage.tool_result(tc.id, str(result), tc.name))
                 except Exception as e:
                     messages.append(LLMMessage.tool_result(tc.id, f"Error: {e}", tc.name))
+
+        # If the last response still had tool calls (hit max_rounds or loop
+        # ended with pending tool results), make one final call WITHOUT tools
+        # to force the LLM to produce a text summary of everything gathered.
+        if final_response and final_response.has_tool_calls:
+            logger.info("Tool loop ended with pending tool results — requesting final summary")
+            final_req = LLMRequest(
+                messages=messages,
+                model=request.model,
+                system_prompt=request.system_prompt,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
+            final_response = self.complete(final_req)
 
         return final_response or LLMResponse(content="", model=request.model, provider=self.provider_name)
 
