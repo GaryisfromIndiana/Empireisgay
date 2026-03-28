@@ -174,8 +174,9 @@ class WarRoomSession:
         from db.repositories.lieutenant import LieutenantRepository
 
         router = ModelRouter(self.empire_id)
-        session_db = get_session()
+        session_db = None
         try:
+            session_db = get_session()
             lt_repo = LieutenantRepository(session_db)
 
             for participant in self.participants:
@@ -226,7 +227,8 @@ class WarRoomSession:
                     })
 
         finally:
-            session_db.close()
+            if session_db is not None:
+                session_db.close()
 
         # Synthesize plans
         unified = self._synthesize_plans(directive_title, plans)

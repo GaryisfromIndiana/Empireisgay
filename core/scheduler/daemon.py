@@ -860,8 +860,9 @@ class SchedulerDaemon:
             from core.warroom.session import WarRoomSession
             from db.models import _generate_id
 
-            session_db = get_session()
+            session_db = None
             try:
+                session_db = get_session()
                 lt_repo = LieutenantRepository(session_db)
                 all_lts = lt_repo.get_by_empire(self.empire_id, status="active")
 
@@ -923,7 +924,8 @@ class SchedulerDaemon:
                 }
 
             finally:
-                session_db.close()
+                if session_db is not None:
+                    session_db.close()
 
         except Exception as e:
             logger.warning("Autonomous war room failed: %s", e)
@@ -943,8 +945,9 @@ class SchedulerDaemon:
         total_filled = 0
 
         # 1. Backfill memory entries (semantic/experiential/design only)
-        session = get_session()
+        session = None
         try:
+            session = get_session()
             stmt = (
                 select(MemoryEntry)
                 .where(and_(
@@ -972,15 +975,18 @@ class SchedulerDaemon:
                 session.commit()
                 logger.info("Backfilled %d/%d memory embeddings", total_filled, len(entries))
         except Exception as e:
-            session.rollback()
+            if session is not None:
+                session.rollback()
             logger.warning("Memory embedding backfill failed: %s", e)
         finally:
-            session.close()
+            if session is not None:
+                session.close()
 
         # 2. Backfill KG entities
         kg_filled = 0
-        session2 = get_session()
+        session2 = None
         try:
+            session2 = get_session()
             stmt = (
                 select(KnowledgeEntity)
                 .where(and_(
@@ -1007,10 +1013,12 @@ class SchedulerDaemon:
                 session2.commit()
                 logger.info("Backfilled %d/%d KG entity embeddings", kg_filled, len(entities))
         except Exception as e:
-            session2.rollback()
+            if session2 is not None:
+                session2.rollback()
             logger.warning("KG embedding backfill failed: %s", e)
         finally:
-            session2.close()
+            if session2 is not None:
+                session2.close()
 
         return {
             "memories_backfilled": total_filled,

@@ -227,6 +227,7 @@ class MemoryManager:
                     "category": e.category,
                     "tags": e.tags_json,
                     "metadata": e.metadata_json,
+                    "confidence": e.confidence_score,
                     "created_at": e.created_at.isoformat() if e.created_at else None,
                 }
                 for e in entries
