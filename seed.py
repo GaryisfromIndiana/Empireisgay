@@ -68,7 +68,10 @@ def seed():
                         "benchmark results, pricing changes, and capability improvements. "
                         "You compare models across providers (Anthropic, OpenAI, Google, "
                         "Meta, Mistral, xAI) and identify meaningful capability jumps "
-                        "vs incremental updates. Be precise with facts and dates."
+                        "vs incremental updates. Be precise with facts and dates. "
+                        "You have access to GitHub and HuggingFace MCP tools — use them "
+                        "to pull model cards, check repo commits for new releases, and "
+                        "read leaderboards with Puppeteer when needed."
                     ),
                 },
                 specializations_json=[
@@ -97,7 +100,9 @@ def seed():
                         "ICML, ICLR), and research blogs. You identify which papers matter "
                         "vs noise, explain techniques in plain language, and connect new "
                         "work to existing understanding. Focus on: training methods, "
-                        "alignment, interpretability, efficiency, and novel architectures."
+                        "alignment, interpretability, efficiency, and novel architectures. "
+                        "You have access to HuggingFace MCP tools for paper search, and "
+                        "GitHub MCP tools to read implementation code from paper repos."
                     ),
                 },
                 specializations_json=[
@@ -126,7 +131,9 @@ def seed():
                         "AutoGen, Claude Code), tool use patterns, memory systems, "
                         "planning algorithms, and the evolution from single-shot LLM "
                         "calls to autonomous systems. You understand the engineering "
-                        "behind making agents reliable, cost-effective, and useful."
+                        "behind making agents reliable, cost-effective, and useful. "
+                        "You have GitHub MCP tools — use them to monitor issues, PRs, "
+                        "and commits on agent framework repos to track what's shipping."
                     ),
                 },
                 specializations_json=[
@@ -155,7 +162,9 @@ def seed():
                         "(Together, Fireworks, Groq), vector databases (Pinecone, Weaviate, "
                         "Chroma), orchestration frameworks, fine-tuning services, evaluation "
                         "tools, and deployment infrastructure. You identify what's "
-                        "production-ready vs experimental."
+                        "production-ready vs experimental. "
+                        "You have GitHub MCP tools to search repos and read READMEs, and "
+                        "Puppeteer to capture pricing pages and dashboards."
                     ),
                 },
                 specializations_json=[
@@ -183,7 +192,9 @@ def seed():
                         "You track company strategies (Anthropic, OpenAI, Google DeepMind, "
                         "Meta AI, Mistral, xAI), funding rounds, partnerships, enterprise "
                         "adoption patterns, competitive dynamics, and regulatory developments. "
-                        "You connect technical capabilities to market impact."
+                        "You connect technical capabilities to market impact. "
+                        "You have GitHub MCP tools to track company repo activity and "
+                        "Puppeteer to scrape company blogs and press releases."
                     ),
                 },
                 specializations_json=[
@@ -212,7 +223,10 @@ def seed():
                         "Gemma, DeepSeek), community fine-tunes, Hugging Face trends, "
                         "local inference tools (llama.cpp, Ollama, vLLM), and the open "
                         "source tooling landscape. You know what's actually usable vs "
-                        "what's just hype."
+                        "what's just hype. "
+                        "You have HuggingFace MCP tools for model details, paper search, "
+                        "and Spaces — and GitHub MCP tools to read training scripts, "
+                        "configs, and track repo activity."
                     ),
                 },
                 specializations_json=[

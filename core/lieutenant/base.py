@@ -399,6 +399,11 @@ class Lieutenant:
         context_parts = [self.persona.build_system_prompt()]
         context_parts.append(f"\nDomain: {self.domain}")
 
+        # Inject MCP tool guidance so the LLM knows what external tools are available
+        mcp_guidance = self._build_mcp_guidance()
+        if mcp_guidance:
+            context_parts.append(f"\n{mcp_guidance}")
+
         if memory_context:
             context_parts.append(f"\n{memory_context}")
         if knowledge_context:
@@ -411,6 +416,69 @@ class Lieutenant:
         )
 
         return context
+
+    # ── MCP tool guidance per domain ─────────────────────────────────
+
+    _MCP_DOMAIN_HINTS: dict[str, str] = {
+        "models": (
+            "- Use mcp_github_* tools to monitor model repos (meta-llama, mistralai, google, etc.) "
+            "for new releases, commits, and changelogs.\n"
+            "- Use mcp_huggingface_hub_repo_details to pull model cards, download stats, and benchmark scores.\n"
+            "- Use mcp_puppeteer_navigate + mcp_puppeteer_screenshot to capture live leaderboards "
+            "(LMSYS Chatbot Arena, Open LLM Leaderboard) that are JS-rendered.\n"
+            "- Use mcp_filesystem_write_file to save model comparison snapshots for future diffing."
+        ),
+        "research": (
+            "- Use mcp_huggingface_paper_search to find latest papers with metadata.\n"
+            "- Use mcp_github_get_file_contents to read implementation code from paper repos.\n"
+            "- Use mcp_github_search_code to find who is implementing a technique across the ecosystem.\n"
+            "- Use mcp_filesystem_write_file to cache paper summaries for cross-referencing.\n"
+            "- Use mcp_puppeteer_navigate to read JS-rendered research blogs and conference sites."
+        ),
+        "agents": (
+            "- Use mcp_github_list_issues + mcp_github_list_pull_requests on agent framework repos "
+            "(langchain-ai/langchain, anthropics/anthropic-sdk-python, crewAIInc/crewAI, etc.) to track what's shipping.\n"
+            "- Use mcp_github_get_file_contents to read changelogs, migration guides, and new tool implementations.\n"
+            "- Use mcp_huggingface_hub_repo_search for agent-related models and datasets.\n"
+            "- Use mcp_puppeteer_navigate to check framework documentation that fetch can't render."
+        ),
+        "tooling": (
+            "- Use mcp_github_search_repositories to find new AI tooling projects and track stars/activity.\n"
+            "- Use mcp_github_get_file_contents to read READMEs, configs, and API schemas.\n"
+            "- Use mcp_puppeteer_navigate + mcp_puppeteer_screenshot to capture pricing pages and dashboards.\n"
+            "- Use mcp_huggingface_space_search to find deployment-related Spaces and tools.\n"
+            "- Use mcp_filesystem_write_file to persist infrastructure comparison data."
+        ),
+        "industry": (
+            "- Use mcp_github_search_repositories sorted by recent to track AI company open-source activity.\n"
+            "- Use mcp_github_list_commits on company repos to detect release cadence and engineering investment.\n"
+            "- Use mcp_puppeteer_navigate to scrape company blogs, press releases, and pricing pages.\n"
+            "- Use mcp_puppeteer_screenshot to capture evidence of announcements and pricing changes.\n"
+            "- Use mcp_filesystem_write_file to persist competitive intelligence data."
+        ),
+        "open_source": (
+            "- Use mcp_huggingface_hub_repo_search + mcp_huggingface_hub_repo_details for trending models, "
+            "download velocity, and community fine-tunes.\n"
+            "- Use mcp_huggingface_space_search + mcp_huggingface_use_space to discover and interact with demo Spaces.\n"
+            "- Use mcp_huggingface_paper_search for papers tied to open-weight releases.\n"
+            "- Use mcp_github_search_repositories to spot emerging open-source projects by stars and forks.\n"
+            "- Use mcp_github_get_file_contents to read model configs, training scripts, and quantization setups.\n"
+            "- Use mcp_filesystem_write_file to cache model comparison data between runs."
+        ),
+    }
+
+    def _build_mcp_guidance(self) -> str:
+        """Build MCP tool usage guidance tailored to this lieutenant's domain."""
+        hints = self._MCP_DOMAIN_HINTS.get(self.domain, "")
+        if not hints:
+            return ""
+        return (
+            "## External Tool Guidance (MCP)\n"
+            "You have access to external tools via MCP servers (GitHub, HuggingFace, Puppeteer, Filesystem). "
+            "Prefer these over generic web search when the data source is known. "
+            "Specific guidance for your domain:\n"
+            f"{hints}"
+        )
 
     def _feedback_memories(self, task: TaskInput, result: TaskResult) -> None:
         """Update memory importance based on task outcome.
