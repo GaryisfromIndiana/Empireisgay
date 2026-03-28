@@ -225,6 +225,59 @@ def qdrant_migrate():
         return jsonify({"error": str(e)}), 500
 
 
+@memory_bp.route("/qdrant/debug")
+def qdrant_debug():
+    """Debug endpoint to check what the migration query finds."""
+    from db.engine import session_scope
+    from db.models import MemoryEntry, KnowledgeEntity
+    from sqlalchemy import select, and_, func
+
+    result = {}
+    with session_scope() as session:
+        # Count with embedding
+        mem_with = session.execute(
+            select(func.count(MemoryEntry.id)).where(
+                and_(
+                    MemoryEntry.embedding_json.is_not(None),
+                    MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
+                )
+            )
+        ).scalar() or 0
+
+        # Try fetching one to inspect
+        sample = session.execute(
+            select(MemoryEntry).where(
+                MemoryEntry.embedding_json.is_not(None),
+            ).limit(1)
+        ).scalars().first()
+
+        sample_info = None
+        if sample:
+            emb = sample.embedding_json
+            sample_info = {
+                "id": sample.id,
+                "empire_id": sample.empire_id,
+                "type": sample.memory_type,
+                "embedding_type": type(emb).__name__,
+                "embedding_len": len(emb) if isinstance(emb, (list, str)) else 0,
+                "embedding_preview": str(emb)[:100] if emb else None,
+            }
+
+        ent_with = session.execute(
+            select(func.count(KnowledgeEntity.id)).where(
+                KnowledgeEntity.embedding_json.is_not(None),
+            )
+        ).scalar() or 0
+
+        result = {
+            "memories_with_embedding": mem_with,
+            "entities_with_embedding": ent_with,
+            "sample_memory": sample_info,
+        }
+
+    return jsonify(result)
+
+
 @memory_bp.route("/embeddings/status")
 def embedding_status():
     """Check how many memories and KG entities have embeddings."""
