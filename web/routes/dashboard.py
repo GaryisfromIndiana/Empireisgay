@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from flask import Blueprint, render_template, jsonify, current_app
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
@@ -119,12 +119,12 @@ def index():
                         from datetime import datetime, timezone, timedelta
                         from db.models import WarRoom, Task
                         one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-                        tick_check = session.query(func.count(WarRoom.id)).filter(
+                        tick_check = session.execute(select(func.count(WarRoom.id)).where(
                             WarRoom.created_at > one_hour_ago
-                        ).scalar() or 0
-                        task_check = session.query(func.count(Task.id)).filter(
+                        )).scalar() or 0
+                        task_check = session.execute(select(func.count(Task.id)).where(
                             Task.created_at > one_hour_ago
-                        ).scalar() or 0
+                        )).scalar() or 0
                         if tick_check or task_check:
                             scheduler_info["running"] = True
                             scheduler_info["note"] = "Activity detected (stats from another worker)"
@@ -304,9 +304,9 @@ def dashboard_stats():
                         from datetime import datetime, timezone, timedelta
                         from db.models import Task
                         one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-                        task_check = session.query(func.count(Task.id)).filter(
+                        task_check = session.execute(select(func.count(Task.id)).where(
                             Task.created_at > one_hour_ago
-                        ).scalar() or 0
+                        )).scalar() or 0
                         if task_check:
                             scheduler_info["running"] = True
                             scheduler_info["recent_tasks"] = task_check

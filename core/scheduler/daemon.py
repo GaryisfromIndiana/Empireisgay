@@ -378,7 +378,8 @@ class SchedulerDaemon:
         if not self._try_acquire_tick_lock():
             return []
 
-        self._tick_count += 1
+        with self._lock:
+            self._tick_count += 1
         now = datetime.now(timezone.utc)
         executed = []
 
@@ -452,8 +453,9 @@ class SchedulerDaemon:
             start = time.time()
             result = job.handler()
             duration = time.time() - start
-            job.last_run = datetime.now(timezone.utc)
-            job.run_count += 1
+            with self._lock:
+                job.last_run = datetime.now(timezone.utc)
+                job.run_count += 1
             return {"job": job_name, "duration_seconds": duration, "result": result}
         except Exception as e:
             return {"job": job_name, "error": str(e)}
@@ -478,7 +480,8 @@ class SchedulerDaemon:
     def get_status(self) -> DaemonStatus:
         """Get daemon status."""
         uptime = time.time() - self._start_time if self._start_time else 0
-        active_jobs = sum(1 for j in self._jobs.values() if j.enabled)
+        with self._lock:
+            active_jobs = sum(1 for j in self._jobs.values() if j.enabled)
 
         return DaemonStatus(
             running=self._running,
@@ -521,20 +524,20 @@ class SchedulerDaemon:
         """Get status of a specific job."""
         with self._lock:
             job = self._jobs.get(job_name)
-        if not job:
-            return {"error": "Job not found"}
-        return {
-            "name": job.name,
-            "type": job.job_type,
-            "enabled": job.enabled,
-            "interval_seconds": job.interval_seconds,
-            "run_count": job.run_count,
-            "error_count": job.error_count,
-            "consecutive_errors": job.consecutive_errors,
-            "last_run": job.last_run.isoformat() if job.last_run else None,
-            "last_error": job.last_error,
-            "avg_duration_ms": job.avg_duration_ms,
-        }
+            if not job:
+                return {"error": "Job not found"}
+            return {
+                "name": job.name,
+                "type": job.job_type,
+                "enabled": job.enabled,
+                "interval_seconds": job.interval_seconds,
+                "run_count": job.run_count,
+                "error_count": job.error_count,
+                "consecutive_errors": job.consecutive_errors,
+                "last_run": job.last_run.isoformat() if job.last_run else None,
+                "last_error": job.last_error,
+                "avg_duration_ms": job.avg_duration_ms,
+            }
 
     # ── Job handlers ───────────────────────────────────────────────────
 

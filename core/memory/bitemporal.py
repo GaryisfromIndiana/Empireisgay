@@ -387,7 +387,7 @@ class BiTemporalMemory:
         fact_versions = [
             FactVersion(
                 version=f.version,
-                content=f.content[:500],
+                content=(f.content or "")[:500],
                 recorded_at=f.recorded_at,
                 superseded_at=f.superseded_at,
                 confidence=f.confidence,
@@ -477,7 +477,7 @@ class BiTemporalMemory:
         negation_words = {"not", "no", "never", "isn't", "aren't", "doesn't", "don't", "won't", "can't", "wasn't", "incorrect", "false", "wrong"}
 
         for fact in current:
-            fact_lower = fact.content.lower()
+            fact_lower = (fact.content or "").lower()
 
             # Check if one has negation and other doesn't on similar topics
             content_has_neg = bool(set(content_lower.split()) & negation_words)
@@ -583,7 +583,7 @@ class BiTemporalMemory:
             content_words = set(content.lower().split()[:60])
 
             for fact in current:
-                fact_words = set(fact.content.lower().split()[:60])
+                fact_words = set((fact.content or "").lower().split()[:60])
                 overlap = len(content_words & fact_words)
                 union = len(content_words | fact_words)
                 similarity = overlap / union if union > 0 else 0

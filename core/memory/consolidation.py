@@ -127,8 +127,8 @@ class MemoryConsolidator:
             duplicates = []
             for key, group_memories in groups.items():
                 if len(group_memories) > 1:
-                    words_a = set(group_memories[0].content.lower().split()[:100])
-                    words_b = set(group_memories[-1].content.lower().split()[:100])
+                    words_a = set((group_memories[0].content or "").lower().split()[:100])
+                    words_b = set((group_memories[-1].content or "").lower().split()[:100])
                     union = len(words_a | words_b)
                     similarity = len(words_a & words_b) / union if union else 0.0
                     duplicates.append(DuplicateGroup(
@@ -270,7 +270,7 @@ class MemoryConsolidator:
                 return 0
 
             # Create summary
-            contents = [ep.content[:200] for ep in old_episodes]
+            contents = [(ep.content or "")[:200] for ep in old_episodes]
             summary_text = f"Summary of {len(old_episodes)} episodes:\n" + "\n".join(f"- {c}" for c in contents[:10])
 
             from core.memory.manager import MemoryManager

@@ -380,7 +380,9 @@ class ModelRouter:
 
             # Try fallback
             if decision.fallback_model:
-                fallback_config = MODEL_CATALOG[decision.fallback_model]
+                fallback_config = MODEL_CATALOG.get(decision.fallback_model)
+                if not fallback_config:
+                    raise
                 fallback_client = self.get_client(fallback_config.provider)
                 request.model = fallback_config.model_id
 

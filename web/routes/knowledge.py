@@ -21,7 +21,7 @@ def knowledge_overview():
         return render_template("knowledge/overview.html", stats=stats.__dict__,
                              central_entities=[{"name": n.name, "type": n.entity_type, "importance": n.importance} for n in central])
     except Exception as e:
-        return render_template("knowledge/overview.html", stats={}, error=str(e))
+        return render_template("knowledge/overview.html", stats={}, central_entities=[], error=str(e))
 
 
 @knowledge_bp.route("/entities")

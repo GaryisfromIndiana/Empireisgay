@@ -173,7 +173,7 @@ class WarRoomSession:
         from db.engine import get_session
         from db.repositories.lieutenant import LieutenantRepository
 
-        router = ModelRouter()
+        router = ModelRouter(self.empire_id)
         session_db = get_session()
         try:
             lt_repo = LieutenantRepository(session_db)
@@ -253,7 +253,7 @@ class WarRoomSession:
         from llm.router import ModelRouter, TaskMetadata
         import json
 
-        router = ModelRouter()
+        router = ModelRouter(self.empire_id)
         results_str = json.dumps(results, indent=2, default=str)[:6000]
 
         prompt = f"""Run a retrospective on this completed directive.
@@ -370,7 +370,7 @@ Respond as JSON:
         from llm.router import ModelRouter, TaskMetadata
         import json
 
-        router = ModelRouter()
+        router = ModelRouter(self.empire_id)
         contrib_text = "\n\n".join(
             f"**{c.get('name', 'Unknown')}** ({c.get('domain', '')}):\n"
             f"Position: {c.get('position', '')}\n"
@@ -432,7 +432,7 @@ Respond as JSON:
         from llm.router import ModelRouter, TaskMetadata
         import json
 
-        router = ModelRouter()
+        router = ModelRouter(self.empire_id)
         plans_text = "\n\n---\n\n".join(
             f"**{p.get('name', 'Unknown')}** ({p.get('domain', '')}):\n{p.get('plan', '')[:1500]}"
             for p in plans
