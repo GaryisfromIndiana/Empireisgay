@@ -172,11 +172,10 @@ def qdrant_migrate():
         mem_count = 0
         ent_count = 0
 
-        # Migrate memories
+        # Migrate ALL memories with embeddings (any empire_id)
         with session_scope() as session:
             entries = list(session.execute(
                 select(MemoryEntry).where(and_(
-                    MemoryEntry.empire_id == empire_id,
                     MemoryEntry.embedding_json.is_not(None),
                     MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
                 ))
@@ -188,7 +187,7 @@ def qdrant_migrate():
                     batch.append({
                         "memory_id": e.id,
                         "embedding": e.embedding_json,
-                        "empire_id": e.empire_id,
+                        "empire_id": e.empire_id or empire_id,
                         "lieutenant_id": e.lieutenant_id or "",
                         "memory_type": e.memory_type,
                         "importance": e.importance_score or 0.5,
@@ -196,13 +195,12 @@ def qdrant_migrate():
                     })
             mem_count = vs.upsert_memories_batch(batch)
 
-        # Migrate entities
+        # Migrate ALL entities with embeddings
         with session_scope() as session:
             entities = list(session.execute(
-                select(KnowledgeEntity).where(and_(
-                    KnowledgeEntity.empire_id == empire_id,
+                select(KnowledgeEntity).where(
                     KnowledgeEntity.embedding_json.is_not(None),
-                ))
+                )
             ).scalars().all())
 
             batch = []
@@ -211,7 +209,7 @@ def qdrant_migrate():
                     batch.append({
                         "entity_id": e.id,
                         "embedding": e.embedding_json,
-                        "empire_id": e.empire_id,
+                        "empire_id": e.empire_id or empire_id,
                         "entity_type": e.entity_type or "",
                         "name": e.name or "",
                         "importance": e.importance_score or 0.5,
