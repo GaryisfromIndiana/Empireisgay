@@ -638,7 +638,8 @@ Write in a professional intelligence-briefing style. Be specific — cite source
         try:
             from core.search.credibility import CredibilityScorer
             scorer = CredibilityScorer()
-            return scorer.score(source)
+            result = scorer.score(source)
+            return result.score  # Extract float from CredibilityScore object
         except Exception:
             return 0.5
 
