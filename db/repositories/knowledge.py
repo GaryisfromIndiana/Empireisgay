@@ -423,17 +423,39 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
         limit: int = 10,
         min_similarity: float = 0.5,
     ) -> list[dict]:
-        """Find entities similar to a given embedding using cosine similarity.
+        """Find entities similar to a given embedding.
 
-        Args:
-            embedding: Query embedding vector.
-            empire_id: Empire ID.
-            limit: Maximum results.
-            min_similarity: Minimum cosine similarity threshold.
-
-        Returns:
-            List of {entity, similarity} dicts.
+        Uses Qdrant when available for sub-millisecond ANN search,
+        falls back to in-memory cosine similarity over SQL rows.
         """
+        # ── Try Qdrant first ──────────────────────────────────────
+        try:
+            from core.vector.store import VectorStore
+            vs = VectorStore.get_instance(empire_id)
+            if vs.enabled:
+                hits = vs.search_entities(
+                    embedding=embedding,
+                    empire_id=empire_id,
+                    limit=limit,
+                    min_score=min_similarity,
+                )
+                if hits:
+                    entity_ids = [h["entity_id"] for h in hits]
+                    score_map = {h["entity_id"]: h["score"] for h in hits}
+                    entries = list(self.session.execute(
+                        select(KnowledgeEntity).where(KnowledgeEntity.id.in_(entity_ids))
+                    ).scalars().all())
+                    entry_map = {e.id: e for e in entries}
+                    results = []
+                    for eid in entity_ids:
+                        entry = entry_map.get(eid)
+                        if entry:
+                            results.append({"entity": entry, "similarity": score_map[eid]})
+                    return results
+        except Exception as e:
+            logger.debug("Qdrant entity search unavailable, falling back to SQL: %s", e)
+
+        # ── Fallback: in-memory cosine similarity ─────────────────
         stmt = (
             select(KnowledgeEntity)
             .where(and_(

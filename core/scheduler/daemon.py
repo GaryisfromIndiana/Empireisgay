@@ -967,12 +967,32 @@ class SchedulerDaemon:
                 ]
                 embeddings = generate_embeddings_batch(texts)
 
+                qdrant_batch = []
                 for entry, emb in zip(entries, embeddings):
                     if emb:
                         entry.embedding_json = emb
                         total_filled += 1
+                        qdrant_batch.append({
+                            "memory_id": entry.id,
+                            "embedding": emb,
+                            "empire_id": entry.empire_id,
+                            "lieutenant_id": entry.lieutenant_id or "",
+                            "memory_type": entry.memory_type,
+                            "importance": entry.importance_score or 0.5,
+                            "decay_factor": entry.decay_factor or 1.0,
+                        })
 
                 session.commit()
+
+                # Sync to Qdrant
+                if qdrant_batch:
+                    try:
+                        from core.vector.store import VectorStore
+                        vs = VectorStore.get_instance(self.empire_id)
+                        vs.upsert_memories_batch(qdrant_batch)
+                    except Exception:
+                        pass
+
                 logger.info("Backfilled %d/%d memory embeddings", total_filled, len(entries))
         except Exception as e:
             if session is not None:
@@ -1005,12 +1025,31 @@ class SchedulerDaemon:
                 ]
                 embeddings = generate_embeddings_batch(texts)
 
+                qdrant_batch = []
                 for entity, emb in zip(entities, embeddings):
                     if emb:
                         entity.embedding_json = emb
                         kg_filled += 1
+                        qdrant_batch.append({
+                            "entity_id": entity.id,
+                            "embedding": emb,
+                            "empire_id": entity.empire_id,
+                            "entity_type": entity.entity_type or "",
+                            "name": entity.name or "",
+                            "importance": entity.importance_score or 0.5,
+                        })
 
                 session2.commit()
+
+                # Sync to Qdrant
+                if qdrant_batch:
+                    try:
+                        from core.vector.store import VectorStore
+                        vs = VectorStore.get_instance(self.empire_id)
+                        vs.upsert_entities_batch(qdrant_batch)
+                    except Exception:
+                        pass
+
                 logger.info("Backfilled %d/%d KG entity embeddings", kg_filled, len(entities))
         except Exception as e:
             if session2 is not None:

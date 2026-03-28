@@ -69,7 +69,10 @@ class Lieutenant:
         self.empire_id = empire_id
         self.persona = persona
         self.domain = domain or persona.domain
-        self.ace = ace_engine or ACEEngine()
+        self.ace = ace_engine or ACEEngine(
+            empire_id=empire_id,
+            lieutenant_id=lieutenant_id,
+        )
         self.memory = MemoryManager(empire_id)
 
         # Internal tracking

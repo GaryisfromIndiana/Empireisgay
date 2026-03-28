@@ -140,6 +140,93 @@ def repair_decay():
     return jsonify({"restored": restored, "by_type": by_type})
 
 
+@memory_bp.route("/qdrant/status")
+def qdrant_status():
+    """Get Qdrant vector store status and stats."""
+    try:
+        from core.vector.store import VectorStore
+        empire_id = current_app.config.get("EMPIRE_ID", "")
+        vs = VectorStore.get_instance(empire_id)
+        return jsonify(vs.get_stats())
+    except Exception as e:
+        return jsonify({"enabled": False, "error": str(e)})
+
+
+@memory_bp.route("/qdrant/migrate", methods=["POST"])
+def qdrant_migrate():
+    """Bulk migrate all existing embeddings from Postgres/SQLite into Qdrant.
+
+    One-shot operation — safe to run multiple times (upserts are idempotent).
+    """
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    try:
+        from core.vector.store import VectorStore
+        vs = VectorStore.get_instance(empire_id)
+        if not vs.enabled:
+            return jsonify({"error": "Qdrant not configured. Set EMPIRE_QDRANT__URL."}), 400
+
+        from db.engine import session_scope
+        from db.models import MemoryEntry, KnowledgeEntity
+        from sqlalchemy import select, and_
+
+        mem_count = 0
+        ent_count = 0
+
+        # Migrate memories
+        with session_scope() as session:
+            entries = list(session.execute(
+                select(MemoryEntry).where(and_(
+                    MemoryEntry.empire_id == empire_id,
+                    MemoryEntry.embedding_json.is_not(None),
+                    MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
+                ))
+            ).scalars().all())
+
+            batch = []
+            for e in entries:
+                if e.embedding_json:
+                    batch.append({
+                        "memory_id": e.id,
+                        "embedding": e.embedding_json,
+                        "empire_id": e.empire_id,
+                        "lieutenant_id": e.lieutenant_id or "",
+                        "memory_type": e.memory_type,
+                        "importance": e.importance_score or 0.5,
+                        "decay_factor": e.decay_factor or 1.0,
+                    })
+            mem_count = vs.upsert_memories_batch(batch)
+
+        # Migrate entities
+        with session_scope() as session:
+            entities = list(session.execute(
+                select(KnowledgeEntity).where(and_(
+                    KnowledgeEntity.empire_id == empire_id,
+                    KnowledgeEntity.embedding_json.is_not(None),
+                ))
+            ).scalars().all())
+
+            batch = []
+            for e in entities:
+                if e.embedding_json:
+                    batch.append({
+                        "entity_id": e.id,
+                        "embedding": e.embedding_json,
+                        "empire_id": e.empire_id,
+                        "entity_type": e.entity_type or "",
+                        "name": e.name or "",
+                        "importance": e.importance_score or 0.5,
+                    })
+            ent_count = vs.upsert_entities_batch(batch)
+
+        return jsonify({
+            "migrated_memories": mem_count,
+            "migrated_entities": ent_count,
+        })
+    except Exception as e:
+        logger.error("Qdrant migration error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @memory_bp.route("/embeddings/status")
 def embedding_status():
     """Check how many memories and KG entities have embeddings."""

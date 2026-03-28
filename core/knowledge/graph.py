@@ -189,6 +189,23 @@ class KnowledgeGraph:
                 embedding_json=embedding,
             )
             repo.commit()
+
+            # Upsert into Qdrant
+            if embedding:
+                try:
+                    from core.vector.store import VectorStore
+                    vs = VectorStore.get_instance(self.empire_id)
+                    vs.upsert_entity(
+                        entity_id=entity.id,
+                        embedding=embedding,
+                        empire_id=self.empire_id,
+                        entity_type=entity_type,
+                        name=name,
+                        importance=confidence,
+                    )
+                except Exception:
+                    pass
+
             return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}
         finally:
             self._close_repo(repo)

@@ -46,7 +46,9 @@ class ToolRegistry:
         self.empire_id = empire_id
         self.lieutenant_id = lieutenant_id
         self._tools: dict[str, ToolRegistration] = {}
+        self._mcp_manager = None
         self._register_builtin_tools()
+        self._register_mcp_tools()
 
     def _register_builtin_tools(self) -> None:
         """Register built-in tools."""
@@ -830,3 +832,88 @@ class ToolRegistry:
                 "stored_entities": result.get("stored_entities", 0),
             },
         )
+
+    # ── MCP tool integration ──────────────────────────────────────────
+
+    def _register_mcp_tools(self) -> None:
+        """Discover and register tools from configured MCP servers."""
+        try:
+            from core.mcp.manager import MCPManager
+            self._mcp_manager = MCPManager.get_instance(self.empire_id)
+            self._mcp_manager.load_config()
+
+            statuses = self._mcp_manager.connect_all()
+            for status in statuses:
+                if status.connected:
+                    logger.info("MCP server %s: %d tools available", status.name, status.tool_count)
+                elif status.error:
+                    logger.warning("MCP server %s failed: %s", status.name, status.error)
+
+            # Register each MCP tool as a ToolRegistration
+            for tool_def in self._mcp_manager.get_tool_definitions():
+                self.register(ToolRegistration(
+                    definition=tool_def,
+                    handler=self._make_mcp_handler(tool_def.name),
+                ))
+        except Exception as e:
+            logger.debug("MCP tool registration skipped: %s", e)
+
+    def _make_mcp_handler(self, prefixed_name: str):
+        """Create a handler closure for an MCP tool."""
+        def handler(args: dict) -> ToolResult:
+            return self._tool_mcp_call(prefixed_name, args)
+        return handler
+
+    def _tool_mcp_call(self, prefixed_name: str, args: dict) -> ToolResult:
+        """Generic handler for MCP tool calls."""
+        if not self._mcp_manager:
+            return ToolResult(tool_name=prefixed_name, success=False, error="MCP manager not initialized")
+
+        try:
+            result = self._mcp_manager.call_tool(prefixed_name, args)
+            output = self._mcp_manager.format_tool_result(result)
+            is_error = result.get("isError", False)
+
+            # Truncate very long results
+            from config.settings import get_settings
+            max_chars = getattr(getattr(get_settings(), "mcp", None), "max_tool_result_chars", 8000)
+            if len(output) > max_chars:
+                output = output[:max_chars] + f"\n... [truncated, {len(output)} total chars]"
+
+            return ToolResult(
+                tool_name=prefixed_name,
+                success=not is_error,
+                output=output,
+                data={"raw_content": result.get("content", [])},
+                error="" if not is_error else output,
+            )
+        except Exception as e:
+            logger.error("MCP tool %s error: %s", prefixed_name, e)
+            return ToolResult(tool_name=prefixed_name, success=False, error=str(e))
+
+    def get_mcp_status(self) -> list[dict]:
+        """Get status of all MCP servers."""
+        if not self._mcp_manager:
+            return []
+        return [
+            {
+                "name": s.name,
+                "connected": s.connected,
+                "version": s.server_version,
+                "tool_count": s.tool_count,
+                "tools": s.tools,
+                "error": s.error,
+            }
+            for s in self._mcp_manager.get_status()
+        ]
+
+    def refresh_mcp_tools(self) -> list[dict]:
+        """Reconnect to all MCP servers and re-register tools."""
+        if self._mcp_manager:
+            self._mcp_manager.disconnect_all()
+
+        # Remove existing MCP tool registrations
+        self._tools = {k: v for k, v in self._tools.items() if not k.startswith("mcp_")}
+
+        self._register_mcp_tools()
+        return self.get_mcp_status()

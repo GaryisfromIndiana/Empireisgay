@@ -173,6 +173,22 @@ class MemoryManager:
             )
             session.add(entry)
 
+        # Upsert into Qdrant (non-blocking — skips if not configured)
+        if embedding:
+            try:
+                from core.vector.store import VectorStore
+                vs = VectorStore.get_instance(self.empire_id)
+                vs.upsert_memory(
+                    memory_id=entry_id,
+                    embedding=embedding,
+                    empire_id=self.empire_id,
+                    lieutenant_id=lieutenant_id or "",
+                    memory_type=memory_type,
+                    importance=importance,
+                )
+            except Exception:
+                pass  # Backfill job will catch it
+
         logger.debug("Stored %s memory: %s (importance=%.2f)", memory_type, title or content[:50], importance)
         return {"id": entry_id, "type": memory_type, "title": title}
 

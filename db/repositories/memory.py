@@ -348,7 +348,42 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
         limit: int = 10,
         min_similarity: float = 0.5,
     ) -> list[dict]:
-        """Find memories similar to a given embedding."""
+        """Find memories similar to a given embedding.
+
+        Uses Qdrant when available for sub-millisecond ANN search,
+        falls back to in-memory cosine similarity over SQL rows.
+        """
+        # ── Try Qdrant first ──────────────────────────────────────
+        try:
+            from core.vector.store import VectorStore
+            vs = VectorStore.get_instance(empire_id)
+            if vs.enabled:
+                hits = vs.search_memories(
+                    embedding=embedding,
+                    empire_id=empire_id,
+                    lieutenant_id=lieutenant_id,
+                    memory_types=memory_types,
+                    limit=limit,
+                    min_score=min_similarity,
+                )
+                if hits:
+                    # Fetch full MemoryEntry objects by ID
+                    memory_ids = [h["memory_id"] for h in hits]
+                    score_map = {h["memory_id"]: h["score"] for h in hits}
+                    entries = list(self.session.execute(
+                        select(MemoryEntry).where(MemoryEntry.id.in_(memory_ids))
+                    ).scalars().all())
+                    entry_map = {e.id: e for e in entries}
+                    results = []
+                    for mid in memory_ids:
+                        entry = entry_map.get(mid)
+                        if entry:
+                            results.append({"memory": entry, "similarity": score_map[mid]})
+                    return results
+        except Exception as e:
+            logger.debug("Qdrant memory search unavailable, falling back to SQL: %s", e)
+
+        # ── Fallback: in-memory cosine similarity ─────────────────
         stmt = (
             select(MemoryEntry)
             .where(and_(

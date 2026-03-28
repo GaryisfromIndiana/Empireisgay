@@ -67,6 +67,7 @@ def create_app(config: dict | None = None) -> Flask:
     from web.routes.budget import budget_bp
     from web.routes.replication import replication_bp
     from web.routes.god_panel import god_panel_bp
+    from web.routes.mcp import mcp_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(lieutenants_bp, url_prefix="/lieutenants")
@@ -81,6 +82,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(budget_bp, url_prefix="/budget")
     app.register_blueprint(replication_bp, url_prefix="/network")
     app.register_blueprint(god_panel_bp, url_prefix="/god")
+    app.register_blueprint(mcp_bp, url_prefix="/mcp")
 
     # ── Authentication ──────────────────────────────────────────────
     from web.middleware.auth import require_login, require_api_auth, _is_auth_enabled, _check_password, _get_auth_config

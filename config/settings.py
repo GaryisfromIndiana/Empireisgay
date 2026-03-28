@@ -196,6 +196,41 @@ class KnowledgeSettings(BaseSettings):
     similarity_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
 
 
+class QdrantSettings(BaseSettings):
+    """Qdrant vector database settings.
+
+    Set EMPIRE_QDRANT__URL to enable Qdrant.
+    Falls back to in-memory Python cosine similarity when not configured.
+    """
+
+    url: str = ""  # e.g. "http://localhost:6333" or Qdrant Cloud URL
+    api_key: str = ""  # For Qdrant Cloud
+    collection_prefix: str = "empire"  # Collections: empire_memories, empire_entities
+    embedding_dimension: int = 1536  # text-embedding-3-small
+    on_disk: bool = True  # Store on disk for persistence
+    batch_upsert_size: int = 100
+    search_limit_default: int = 20
+    hnsw_ef: int = 128  # Higher = more accurate but slower
+    hnsw_m: int = 16  # Higher = more memory, better recall
+
+
+class MCPSettings(BaseSettings):
+    """MCP (Model Context Protocol) server settings.
+
+    Configure external MCP servers that lieutenants can use as tools.
+    Servers are defined as a dict of name -> config.
+
+    Example env var:
+        EMPIRE_MCP__SERVERS='{"filesystem": {"command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/data"]}}'
+    """
+
+    servers: dict = Field(default_factory=dict)
+    enabled: bool = True
+    auto_connect_on_start: bool = True
+    default_timeout: float = Field(default=30.0, ge=5.0, le=300.0)
+    max_tool_result_chars: int = Field(default=8000, ge=500, le=50000)
+
+
 class EvolutionSettings(BaseSettings):
     """Evolution system settings."""
 
@@ -262,6 +297,8 @@ class Settings(BaseSettings):
     warroom: WarRoomSettings = Field(default_factory=WarRoomSettings)
     knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
     evolution: EvolutionSettings = Field(default_factory=EvolutionSettings)
+    qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
+    mcp: MCPSettings = Field(default_factory=MCPSettings)
 
     @field_validator("data_dir", mode="before")
     @classmethod

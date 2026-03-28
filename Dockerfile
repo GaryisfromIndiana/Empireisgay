@@ -2,14 +2,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies + Node.js (needed for MCP servers)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev && \
+    gcc libpq-dev curl && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies first (cache layer)
 COPY pyproject.toml .
-RUN pip install --no-cache-dir . || pip install --no-cache-dir flask gunicorn sqlalchemy pydantic pydantic-settings anthropic openai python-dotenv ddgs trafilatura feedparser psycopg2-binary markdown redis
+RUN pip install --no-cache-dir . || pip install --no-cache-dir flask gunicorn sqlalchemy pydantic pydantic-settings anthropic openai python-dotenv ddgs trafilatura feedparser psycopg2-binary markdown redis qdrant-client
 
 # Copy application
 COPY . .

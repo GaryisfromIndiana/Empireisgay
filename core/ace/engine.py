@@ -12,10 +12,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from llm.base import LLMRequest, LLMResponse, LLMMessage
+from llm.base import LLMRequest, LLMResponse, LLMMessage, ToolDefinition
 from llm.router import ModelRouter, TaskMetadata
 from llm.schemas import PlanningOutput, CriticOutput, parse_llm_output
 from config.settings import get_settings
+from core.ace.tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,8 @@ class ACEEngine:
         critic_model: str = "",
         max_iterations: int = 3,
         min_quality: float = 0.6,
+        empire_id: str = "",
+        lieutenant_id: str = "",
     ):
         self.router = router or ModelRouter()
         self._planning_model = planning_model
@@ -159,6 +162,9 @@ class ACEEngine:
         self._critic_model = critic_model
         self._max_iterations = max_iterations
         self._min_quality = min_quality
+        self._empire_id = empire_id
+        self._lieutenant_id = lieutenant_id
+        self._tool_registry: ToolRegistry | None = None
 
         # Load defaults from settings
         try:
@@ -174,8 +180,19 @@ class ACEEngine:
                 self._max_iterations = s.ace.max_pipeline_iterations
             if min_quality == 0.6:
                 self._min_quality = s.quality.min_confidence_score
+            if not self._empire_id:
+                self._empire_id = s.empire_id
         except Exception:
             pass
+
+        # Initialize tool registry (includes MCP tools)
+        try:
+            self._tool_registry = ToolRegistry(
+                empire_id=self._empire_id,
+                lieutenant_id=self._lieutenant_id,
+            )
+        except Exception as e:
+            logger.debug("Tool registry init failed (tools unavailable): %s", e)
 
     def execute_task(self, task: TaskInput, context: ACEContext | None = None) -> TaskResult:
         """Execute a single task through the full 3-agent pipeline.
@@ -449,6 +466,17 @@ Be specific, accurate, and comprehensive.
 Cite sources or reasoning where applicable.
 """
 
+        # Add tool usage instructions if tools are available
+        tool_definitions = []
+        if self._tool_registry:
+            tool_definitions = self._tool_registry.get_definitions()
+            if tool_definitions:
+                exec_prompt += f"""
+You have {len(tool_definitions)} tools available. Use them to gather information,
+search the web, recall memories, look up knowledge, and interact with external systems.
+Call tools when you need real data — don't guess or hallucinate facts.
+"""
+
         model = task.model_override or self._execution_model
         metadata = TaskMetadata(
             task_type=task.task_type,
@@ -463,14 +491,32 @@ Cite sources or reasoning where applicable.
                 system_prompt=system_prompt,
                 temperature=0.7,
                 max_tokens=task.max_tokens,
+                tools=tool_definitions,
+                tool_choice="auto" if tool_definitions else None,
             )
-            response = self.router.execute(request, metadata)
+
+            decision = self.router.route(metadata)
+            request.model = decision.model_config.model_id
+            client = self.router.get_client(decision.provider)
+
+            # Use complete_with_tools for automatic tool execution loop
+            if tool_definitions and self._tool_registry:
+                response = client.complete_with_tools(
+                    request,
+                    tool_executor=self._tool_registry.execute_tool_call,
+                    max_rounds=5,
+                )
+            else:
+                response = client.complete(request)
+
+            self.router._record_cost(response, decision.model_key, decision.provider)
 
             return {
                 "content": response.content,
                 "model": response.model,
                 "tokens": response.total_tokens,
                 "cost": response.cost_usd,
+                "tool_calls_made": len(response.tool_calls) if response.tool_calls else 0,
             }
         except Exception as e:
             logger.error("Execution failed: %s", e)
