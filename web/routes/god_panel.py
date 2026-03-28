@@ -754,6 +754,77 @@ def trigger_autoresearch():
     })
 
 
+@god_panel_bp.route("/warroom", methods=["POST"])
+def trigger_warroom():
+    """Trigger an autonomous war room debate.
+
+    Optionally pass {"topic": "...", "domains": ["models","agents",...]}
+    to force a specific topic. Otherwise auto-detects from recent research.
+    """
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    data = request.get_json(silent=True) or {}
+    forced_topic = data.get("topic", "")
+    forced_domains = data.get("domains", [])
+
+    command_id = str(uuid.uuid4())[:12]
+    _track_command(command_id, forced_topic or "Auto-detect debate topic", "WARROOM", forced_topic or "autonomous")
+
+    app = current_app._get_current_object()
+
+    def _run(app_ref, cmd_id, eid, topic, domains):
+        with app_ref.app_context():
+            _update_command_status(cmd_id, "running")
+            try:
+                if topic and domains:
+                    # Forced topic — run directly
+                    from core.warroom.session import WarRoomSession
+                    from db.engine import get_session
+                    from db.repositories.lieutenant import LieutenantRepository
+                    from db.models import _generate_id
+
+                    session_db = get_session()
+                    try:
+                        lt_repo = LieutenantRepository(session_db)
+                        all_lts = lt_repo.get_by_empire(eid, status="active")
+
+                        war_room = WarRoomSession(
+                            session_id=_generate_id(), empire_id=eid,
+                            session_type="manual_debate",
+                        )
+                        for lt in all_lts:
+                            if lt.domain in domains:
+                                war_room.add_participant(lt.id, lt.name, lt.domain)
+
+                        result = war_room.start_debate(topic)
+                        _complete_command(cmd_id, {
+                            "topic": topic, "domains": domains,
+                            "participants": len(war_room.participants),
+                            "contributions": result.get("participant_count", 0),
+                            "synthesis": result.get("synthesis", {}),
+                        })
+                    finally:
+                        session_db.close()
+                else:
+                    # Auto-detect — use the scheduler's logic
+                    from core.scheduler.daemon import SchedulerDaemon
+                    daemon = SchedulerDaemon(eid)
+                    result = daemon._run_autonomous_warroom()
+                    _complete_command(cmd_id, result)
+            except Exception as e:
+                logger.error("War room failed: %s", e)
+                _complete_command(cmd_id, error=str(e))
+
+    threading.Thread(target=_run, args=(app, command_id, empire_id, forced_topic, forced_domains), daemon=True).start()
+
+    return jsonify({
+        "status": "accepted",
+        "command_id": command_id,
+        "topic": forced_topic or "auto-detecting from recent research",
+        "poll_url": f"/god/command/{command_id}/status",
+        "message": "War Room debate starting — lieutenants will argue from their domain perspectives",
+    })
+
+
 def _execute_deep_research(
     empire_id: str,
     topic: str,

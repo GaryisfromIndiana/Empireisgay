@@ -264,6 +264,15 @@ class SchedulerDaemon:
             description="Synthesize overlapping knowledge across lieutenant domains",
         ))
 
+        self.register_job(JobConfig(
+            name="autonomous_warroom",
+            job_type="autonomous_warroom",
+            interval_seconds=21600,  # 6 hours
+            handler=self._run_autonomous_warroom,
+            priority=5,
+            description="Auto-detect cross-domain topics and run lieutenant debates",
+        ))
+
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
         with self._lock:
@@ -752,4 +761,144 @@ class SchedulerDaemon:
             }
         except Exception as e:
             logger.warning("Cross-lieutenant synthesis failed: %s", e)
+            return {"error": str(e)}
+
+    def _run_autonomous_warroom(self) -> dict:
+        """Auto-detect cross-domain topics and run lieutenant debates.
+
+        Flow:
+        1. Find recent high-importance research across domains
+        2. Use LLM to identify a debate-worthy topic where lieutenants would disagree
+        3. Spin up a war room with relevant lieutenants
+        4. Store the synthesis as experiential + design memories
+        """
+        try:
+            import json
+            from core.memory.manager import MemoryManager
+            from core.memory.bitemporal import BiTemporalMemory
+            from db.engine import get_session
+            from db.repositories.lieutenant import LieutenantRepository
+
+            mm = MemoryManager(self.empire_id)
+
+            # 1. Gather recent high-importance memories across all domains
+            recent = mm.recall(memory_types=["semantic"], limit=30)
+            if len(recent) < 5:
+                return {"skipped": True, "reason": "Not enough semantic memories for debate"}
+
+            recent_titles = [m.get("title", m.get("content", "")[:80]) for m in recent[:20]]
+            recent_block = "\n".join(f"- {t}" for t in recent_titles)
+
+            # 2. Ask LLM to pick a debate-worthy topic
+            from llm.router import ModelRouter, TaskMetadata
+            from llm.base import LLMRequest, LLMMessage
+
+            router = ModelRouter(self.empire_id)
+
+            topic_prompt = (
+                "You are the War Room Director for an autonomous AI research system.\n"
+                "Below are recent research findings stored in Empire's memory:\n\n"
+                f"{recent_block}\n\n"
+                "Identify ONE topic where multiple AI research domains would have "
+                "genuinely different perspectives worth debating. The topic should be:\n"
+                "- Timely and based on the recent findings above\n"
+                "- Controversial or multi-faceted (not a settled fact)\n"
+                "- Relevant to at least 3 of these domains: models, research, agents, tooling, industry, open_source\n\n"
+                "Respond with EXACTLY this JSON:\n"
+                '{"topic": "the debate topic as a question", '
+                '"context": "1-2 sentences of context from the findings", '
+                '"domains": ["domain1", "domain2", "domain3"]}'
+            )
+
+            resp = router.execute(
+                LLMRequest(messages=[LLMMessage.user(topic_prompt)], max_tokens=300, temperature=0.7),
+                TaskMetadata(task_type="planning", complexity="simple"),
+            )
+
+            # Parse topic
+            text = resp.content
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start < 0 or end <= start:
+                return {"error": "Failed to parse debate topic"}
+
+            plan = json.loads(text[start:end])
+            debate_topic = plan.get("topic", "")
+            debate_context = plan.get("context", "")
+            debate_domains = plan.get("domains", [])
+
+            if not debate_topic or len(debate_domains) < 2:
+                return {"skipped": True, "reason": "No suitable debate topic found"}
+
+            # 3. Create war room session with relevant lieutenants
+            from core.warroom.session import WarRoomSession
+            from db.models import _generate_id
+
+            session_db = get_session()
+            try:
+                lt_repo = LieutenantRepository(session_db)
+                all_lts = lt_repo.get_by_empire(self.empire_id, status="active")
+
+                war_room = WarRoomSession(
+                    session_id=_generate_id(),
+                    empire_id=self.empire_id,
+                    session_type="autonomous_debate",
+                )
+
+                added = 0
+                for lt in all_lts:
+                    if lt.domain in debate_domains:
+                        war_room.add_participant(lt.id, lt.name, lt.domain)
+                        added += 1
+
+                if added < 2:
+                    return {"skipped": True, "reason": f"Only {added} lieutenant(s) matched domains"}
+
+                # 4. Run the debate
+                logger.info("Autonomous war room: '%s' with %d lieutenants", debate_topic[:60], added)
+                result = war_room.start_debate(debate_topic, context=debate_context)
+
+                # 5. Store synthesis as experiential memory + design memory
+                synthesis = result.get("synthesis", {})
+                synthesis_text = ""
+                if isinstance(synthesis, dict):
+                    synthesis_text = synthesis.get("synthesis", "") or synthesis.get("summary", "") or str(synthesis)
+                elif isinstance(synthesis, str):
+                    synthesis_text = synthesis
+
+                if synthesis_text:
+                    bt = BiTemporalMemory(self.empire_id)
+                    bt.store_intelligent(
+                        content=f"War Room Debate: {debate_topic}\n\n{synthesis_text[:2000]}",
+                        title=f"Debate: {debate_topic[:60]}",
+                        category="warroom_synthesis",
+                        importance=0.8,
+                        tags=["warroom", "debate", "autonomous"] + debate_domains,
+                    )
+
+                    # Also store as experiential — what did we learn from the debate?
+                    decisions = result.get("synthesis", {}).get("decisions", []) if isinstance(result.get("synthesis"), dict) else []
+                    if decisions:
+                        mm.store(
+                            content=f"Debate decisions on '{debate_topic}':\n" + "\n".join(f"- {d}" for d in decisions[:5]),
+                            memory_type="experiential",
+                            title=f"Debate lesson: {debate_topic[:50]}",
+                            category="warroom_decision",
+                            importance=0.75,
+                            tags=["warroom", "decision", "autonomous"],
+                        )
+
+                return {
+                    "topic": debate_topic,
+                    "participants": added,
+                    "contributions": result.get("participant_count", 0),
+                    "decisions": len(result.get("synthesis", {}).get("decisions", [])) if isinstance(result.get("synthesis"), dict) else 0,
+                    "domains": debate_domains,
+                }
+
+            finally:
+                session_db.close()
+
+        except Exception as e:
+            logger.warning("Autonomous war room failed: %s", e)
             return {"error": str(e)}
