@@ -499,7 +499,7 @@ class ToolRegistry:
         from core.memory.bitemporal import BiTemporalMemory
         bt = BiTemporalMemory(self.empire_id)
 
-        fact = bt.store_intelligent(
+        fact = bt.store_smart(
             content=content,
             title=f"Finding: {content[:80]}",
             category=category,

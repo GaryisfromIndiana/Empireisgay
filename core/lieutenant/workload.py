@@ -82,6 +82,7 @@ class WorkloadBalancer:
             task_repo = TaskRepository(session)
 
             active_lts = lt_repo.get_by_empire(self.empire_id, status="active")
+            real_costs = lt_repo.get_real_costs_bulk([lt.id for lt in active_lts])
             states = []
 
             for lt in active_lts:
@@ -106,7 +107,7 @@ class WorkloadBalancer:
                     status=lt.status,
                     current_task=has_current,
                     tasks_today=tasks_today,
-                    cost_today=lt.total_cost_usd,
+                    cost_today=real_costs.get(lt.id, 0.0),
                     avg_task_duration=lt.avg_execution_time,
                     performance_score=lt.performance_score,
                     load_score=load,

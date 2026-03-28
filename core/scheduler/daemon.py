@@ -822,7 +822,11 @@ class SchedulerDaemon:
             if start < 0 or end <= start:
                 return {"error": "Failed to parse debate topic"}
 
-            plan = json.loads(text[start:end])
+            try:
+                plan = json.loads(text[start:end])
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning("Autonomous warroom: failed to parse LLM JSON: %s", e)
+                return {"error": f"Failed to parse debate topic JSON: {e}"}
             debate_topic = plan.get("topic", "")
             debate_context = plan.get("context", "")
             debate_domains = plan.get("domains", [])
@@ -868,7 +872,7 @@ class SchedulerDaemon:
 
                 if synthesis_text:
                     bt = BiTemporalMemory(self.empire_id)
-                    bt.store_intelligent(
+                    bt.store_smart(
                         content=f"War Room Debate: {debate_topic}\n\n{synthesis_text[:2000]}",
                         title=f"Debate: {debate_topic[:60]}",
                         category="warroom_synthesis",

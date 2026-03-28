@@ -283,6 +283,40 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
             "period_days": days,
         }
 
+    def get_real_cost(self, lieutenant_id: str) -> float:
+        """Get real cost for a lieutenant from BudgetLog.
+
+        Lieutenant.total_cost_usd is not reliably incremented, so we
+        sum from BudgetLog instead (same pattern used for Empire costs).
+        """
+        total = self.session.execute(
+            select(func.coalesce(func.sum(BudgetLog.cost_usd), 0.0))
+            .where(BudgetLog.lieutenant_id == lieutenant_id)
+        ).scalar()
+        return float(total or 0.0)
+
+    def get_real_costs_bulk(self, lieutenant_ids: list[str]) -> dict[str, float]:
+        """Get real costs for multiple lieutenants from BudgetLog.
+
+        Returns:
+            Dict mapping lieutenant_id -> total cost USD.
+        """
+        if not lieutenant_ids:
+            return {}
+        stmt = (
+            select(
+                BudgetLog.lieutenant_id,
+                func.coalesce(func.sum(BudgetLog.cost_usd), 0.0).label("total"),
+            )
+            .where(BudgetLog.lieutenant_id.in_(lieutenant_ids))
+            .group_by(BudgetLog.lieutenant_id)
+        )
+        results = self.session.execute(stmt).all()
+        costs = {lid: 0.0 for lid in lieutenant_ids}
+        for row in results:
+            costs[row[0]] = float(row[1])
+        return costs
+
     def get_domains(self, empire_id: str) -> list[str]:
         """Get all unique domains for an empire's lieutenants."""
         return self.distinct_values("domain", {"empire_id": empire_id})
@@ -326,7 +360,6 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
                 func.avg(Lieutenant.performance_score).label("avg_perf"),
                 func.sum(Lieutenant.tasks_completed).label("total_completed"),
                 func.sum(Lieutenant.tasks_failed).label("total_failed"),
-                func.sum(Lieutenant.total_cost_usd).label("total_cost"),
             )
             .where(Lieutenant.empire_id == empire_id)
             .group_by(Lieutenant.status)
@@ -346,17 +379,29 @@ class LieutenantRepository(BaseRepository[Lieutenant]):
         perf_count = 0
 
         for row in results:
-            status, count, avg_perf, completed, failed, cost = row
+            status, count, avg_perf, completed, failed = row
             summary["by_status"][status] = count
             summary["total_lieutenants"] += count
             summary["total_tasks_completed"] += int(completed or 0)
             summary["total_tasks_failed"] += int(failed or 0)
-            summary["total_cost_usd"] += float(cost or 0)
             if avg_perf is not None:
                 perf_sum += float(avg_perf) * count
                 perf_count += count
 
         if perf_count > 0:
             summary["avg_performance"] = perf_sum / perf_count
+
+        # Pull real cost from BudgetLog (Lieutenant.total_cost_usd is never
+        # reliably incremented — same fix applied to Empire-level costs).
+        lt_ids_stmt = (
+            select(Lieutenant.id).where(Lieutenant.empire_id == empire_id)
+        )
+        lt_ids = [r[0] for r in self.session.execute(lt_ids_stmt).all()]
+        if lt_ids:
+            total_cost = self.session.execute(
+                select(func.coalesce(func.sum(BudgetLog.cost_usd), 0.0))
+                .where(BudgetLog.lieutenant_id.in_(lt_ids))
+            ).scalar()
+            summary["total_cost_usd"] = float(total_cost or 0.0)
 
         return summary

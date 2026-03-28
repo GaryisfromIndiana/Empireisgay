@@ -160,6 +160,7 @@ class LieutenantManager:
         repo = self._get_repo()
         try:
             db_lts = repo.get_by_empire(self.empire_id, status=status, domain=domain)
+            real_costs = repo.get_real_costs_bulk([lt.id for lt in db_lts])
 
             result = [
                 {
@@ -170,7 +171,7 @@ class LieutenantManager:
                     "performance_score": lt.performance_score,
                     "tasks_completed": lt.tasks_completed,
                     "tasks_failed": lt.tasks_failed,
-                    "total_cost": lt.total_cost_usd,
+                    "total_cost": real_costs.get(lt.id, 0.0),
                     "last_active": lt.last_active_at.isoformat() if lt.last_active_at else None,
                 }
                 for lt in db_lts

@@ -138,13 +138,14 @@ def index():
                 from db.repositories.lieutenant import LieutenantRepository
                 lt_repo = LieutenantRepository(session)
                 lts = lt_repo.get_by_empire(empire_id, status="active")
+                real_costs = lt_repo.get_real_costs_bulk([lt.id for lt in lts])
                 fleet_stats = [
                     {
                         "name": lt.name,
                         "domain": lt.domain,
                         "performance": lt.performance_score,
                         "tasks": lt.tasks_completed + lt.tasks_failed,
-                        "cost": lt.total_cost_usd,
+                        "cost": real_costs.get(lt.id, 0.0),
                     }
                     for lt in sorted(lts, key=lambda x: x.performance_score, reverse=True)
                 ]
@@ -235,13 +236,14 @@ def dashboard_stats():
                 from db.repositories.lieutenant import LieutenantRepository
                 lt_repo = LieutenantRepository(session)
                 lts = lt_repo.get_by_empire(empire_id, status="active")
+                real_costs = lt_repo.get_real_costs_bulk([lt.id for lt in lts])
                 fleet_stats = [
                     {
                         "name": lt.name,
                         "domain": lt.domain,
                         "performance": lt.performance_score,
                         "tasks": lt.tasks_completed + lt.tasks_failed,
-                        "cost": lt.total_cost_usd,
+                        "cost": real_costs.get(lt.id, 0.0),
                     }
                     for lt in sorted(lts, key=lambda x: x.performance_score, reverse=True)
                 ]

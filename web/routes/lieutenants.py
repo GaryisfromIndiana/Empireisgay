@@ -56,6 +56,7 @@ def lieutenant_detail(lieutenant_id: str):
 
             task_stats = repo.get_task_stats(lieutenant_id)
             cost_breakdown = repo.get_cost_breakdown(lieutenant_id)
+            real_cost = repo.get_real_cost(lieutenant_id)
 
             return render_template(
                 "lieutenants/detail.html",
@@ -63,7 +64,7 @@ def lieutenant_detail(lieutenant_id: str):
                     "id": lt.id, "name": lt.name, "domain": lt.domain,
                     "status": lt.status, "performance": lt.performance_score,
                     "tasks_completed": lt.tasks_completed, "tasks_failed": lt.tasks_failed,
-                    "total_cost": lt.total_cost_usd, "avg_quality": lt.avg_quality_score,
+                    "total_cost": real_cost, "avg_quality": lt.avg_quality_score,
                     "persona": lt.persona_json,
                     "specializations": lt.specializations_json,
                     "last_active": lt.last_active_at.isoformat() if lt.last_active_at else None,

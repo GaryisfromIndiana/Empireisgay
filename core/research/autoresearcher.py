@@ -488,7 +488,7 @@ Rules:
 
         for finding in findings[:8]:
             try:
-                bt.store_intelligent(
+                bt.store_smart(
                     content=(
                         f"{finding.title}\n\n{finding.content[:1500]}\n\n"
                         f"Source: {finding.source_name} ({finding.source_url})"
