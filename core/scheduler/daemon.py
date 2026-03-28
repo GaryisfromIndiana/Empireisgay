@@ -273,6 +273,15 @@ class SchedulerDaemon:
             description="Auto-detect cross-domain topics and run lieutenant debates",
         ))
 
+        self.register_job(JobConfig(
+            name="embedding_backfill",
+            job_type="embedding_backfill",
+            interval_seconds=3600,  # 1 hour
+            handler=self._run_embedding_backfill,
+            priority=8,
+            description="Generate embeddings for memories and KG entities that lack them",
+        ))
+
     def register_job(self, job: JobConfig) -> None:
         """Register a recurring job."""
         with self._lock:
@@ -906,3 +915,91 @@ class SchedulerDaemon:
         except Exception as e:
             logger.warning("Autonomous war room failed: %s", e)
             return {"error": str(e)}
+
+    def _run_embedding_backfill(self) -> dict:
+        """Backfill embeddings for memories and KG entities that don't have them.
+
+        Processes a batch per tick to avoid hammering the embedding API.
+        """
+        from db.engine import get_session
+        from db.models import MemoryEntry, KnowledgeEntity
+        from sqlalchemy import select, and_
+        from core.memory.embeddings import generate_embeddings_batch
+
+        batch_size = 50
+        total_filled = 0
+
+        # 1. Backfill memory entries (semantic/experiential/design only)
+        session = get_session()
+        try:
+            stmt = (
+                select(MemoryEntry)
+                .where(and_(
+                    MemoryEntry.empire_id == self.empire_id,
+                    MemoryEntry.embedding_json.is_(None),
+                    MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
+                ))
+                .order_by(MemoryEntry.effective_importance.desc())
+                .limit(batch_size)
+            )
+            entries = list(session.execute(stmt).scalars().all())
+
+            if entries:
+                texts = [
+                    f"{e.title}\n{e.content}" if e.title else e.content
+                    for e in entries
+                ]
+                embeddings = generate_embeddings_batch(texts)
+
+                for entry, emb in zip(entries, embeddings):
+                    if emb:
+                        entry.embedding_json = emb
+                        total_filled += 1
+
+                session.commit()
+                logger.info("Backfilled %d/%d memory embeddings", total_filled, len(entries))
+        except Exception as e:
+            session.rollback()
+            logger.warning("Memory embedding backfill failed: %s", e)
+        finally:
+            session.close()
+
+        # 2. Backfill KG entities
+        kg_filled = 0
+        session2 = get_session()
+        try:
+            stmt = (
+                select(KnowledgeEntity)
+                .where(and_(
+                    KnowledgeEntity.empire_id == self.empire_id,
+                    KnowledgeEntity.embedding_json.is_(None),
+                ))
+                .order_by(KnowledgeEntity.importance_score.desc())
+                .limit(batch_size)
+            )
+            entities = list(session2.execute(stmt).scalars().all())
+
+            if entities:
+                texts = [
+                    f"{e.name}: {e.description}" if e.description else e.name
+                    for e in entities
+                ]
+                embeddings = generate_embeddings_batch(texts)
+
+                for entity, emb in zip(entities, embeddings):
+                    if emb:
+                        entity.embedding_json = emb
+                        kg_filled += 1
+
+                session2.commit()
+                logger.info("Backfilled %d/%d KG entity embeddings", kg_filled, len(entities))
+        except Exception as e:
+            session2.rollback()
+            logger.warning("KG embedding backfill failed: %s", e)
+        finally:
+            session2.close()
+
+        return {
+            "memories_backfilled": total_filled,
+            "kg_entities_backfilled": kg_filled,
+        }

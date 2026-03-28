@@ -126,3 +126,51 @@ def repair_decay():
                     restored += 1
 
     return jsonify({"restored": restored, "by_type": by_type})
+
+
+@memory_bp.route("/embeddings/status")
+def embedding_status():
+    """Check how many memories and KG entities have embeddings."""
+    empire_id = current_app.config.get("EMPIRE_ID", "")
+    from db.engine import get_session
+    from db.models import MemoryEntry, KnowledgeEntity
+    from sqlalchemy import select, func, and_
+
+    session = get_session()
+    try:
+        mem_total = session.execute(
+            select(func.count(MemoryEntry.id)).where(
+                and_(MemoryEntry.empire_id == empire_id,
+                     MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]))
+            )
+        ).scalar() or 0
+
+        mem_with_emb = session.execute(
+            select(func.count(MemoryEntry.id)).where(
+                and_(MemoryEntry.empire_id == empire_id,
+                     MemoryEntry.memory_type.in_(["semantic", "experiential", "design"]),
+                     MemoryEntry.embedding_json.is_not(None))
+            )
+        ).scalar() or 0
+
+        kg_total = session.execute(
+            select(func.count(KnowledgeEntity.id)).where(
+                KnowledgeEntity.empire_id == empire_id
+            )
+        ).scalar() or 0
+
+        kg_with_emb = session.execute(
+            select(func.count(KnowledgeEntity.id)).where(
+                and_(KnowledgeEntity.empire_id == empire_id,
+                     KnowledgeEntity.embedding_json.is_not(None))
+            )
+        ).scalar() or 0
+
+        return jsonify({
+            "memories": {"total": mem_total, "with_embeddings": mem_with_emb,
+                         "coverage": f"{mem_with_emb/mem_total*100:.1f}%" if mem_total else "0%"},
+            "kg_entities": {"total": kg_total, "with_embeddings": kg_with_emb,
+                            "coverage": f"{kg_with_emb/kg_total*100:.1f}%" if kg_total else "0%"},
+        })
+    finally:
+        session.close()

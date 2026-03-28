@@ -168,6 +168,15 @@ class KnowledgeGraph:
                 repo.commit()
                 return {"id": existing.id, "name": name, "action": "updated"}
 
+            # Generate embedding for semantic search
+            embedding = None
+            try:
+                from core.memory.embeddings import generate_embedding
+                embed_text = f"{name}: {description}" if description else name
+                embedding = generate_embedding(embed_text)
+            except Exception:
+                pass
+
             entity = repo.create(
                 empire_id=self.empire_id,
                 entity_type=entity_type,
@@ -177,6 +186,7 @@ class KnowledgeGraph:
                 confidence=confidence,
                 source_task_id=source_task_id or None,
                 tags_json=tags or [],
+                embedding_json=embedding,
             )
             repo.commit()
             return {"id": entity.id, "name": name, "type": entity_type, "action": "created"}

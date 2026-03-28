@@ -195,6 +195,15 @@ class BiTemporalMemory:
                     "temporal": True,
                 }
 
+                # Generate embedding for semantic search
+                embedding = None
+                try:
+                    from core.memory.embeddings import generate_embedding
+                    embed_text = f"{title}\n{content}" if title else content
+                    embedding = generate_embedding(embed_text)
+                except Exception:
+                    pass
+
                 # Insert new entry in same transaction
                 new_entry = MemoryModel(
                     id=entry_id,
@@ -210,6 +219,7 @@ class BiTemporalMemory:
                     decay_factor=1.0,
                     tags_json=(tags or []) + ["temporal"],
                     metadata_json=metadata,
+                    embedding_json=embedding,
                     source_type="temporal_fact",
                 )
                 session.add(new_entry)

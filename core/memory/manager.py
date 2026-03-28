@@ -142,6 +142,13 @@ class MemoryManager:
 
         entry_id = _generate_id()
         with session_scope() as session:
+            # Generate embedding for semantic search (non-blocking — None on failure)
+            embedding = None
+            if memory_type in ("semantic", "experiential", "design"):
+                from core.memory.embeddings import generate_embedding
+                embed_text = f"{title}\n{content}" if title else content
+                embedding = generate_embedding(embed_text)
+
             entry = MemoryModel(
                 id=entry_id,
                 empire_id=self.empire_id,
@@ -156,6 +163,7 @@ class MemoryManager:
                 decay_factor=1.0,
                 tags_json=tags or [],
                 metadata_json=enriched_metadata,
+                embedding_json=embedding,
                 source_task_id=source_task_id or None,
                 source_type=source_type,
                 expires_at=expires_at,
@@ -186,12 +194,9 @@ class MemoryManager:
         """
         with self._repo_scope(commit=refresh_on_access) as repo:
             if query:
-                entries = repo.search(
-                    query=query,
-                    empire_id=self.empire_id,
-                    lieutenant_id=lieutenant_id or None,
-                    memory_types=memory_types,
-                    limit=limit,
+                # Try semantic search first, then merge with ILIKE results
+                entries = self._hybrid_recall(
+                    repo, query, lieutenant_id, memory_types, limit,
                 )
             else:
                 entries = repo.get_most_important(
@@ -223,6 +228,56 @@ class MemoryManager:
                 }
                 for e in entries
             ]
+
+    def _hybrid_recall(self, repo, query: str, lieutenant_id: str,
+                       memory_types: list[str] | None, limit: int) -> list:
+        """Combine semantic similarity search with ILIKE text search.
+
+        Semantic results get priority (they find conceptually related memories
+        even without exact word matches), then ILIKE fills remaining slots.
+        """
+        seen_ids: set[str] = set()
+        merged: list = []
+
+        # 1. Semantic search — embed the query and find similar memories
+        try:
+            from core.memory.embeddings import generate_embedding
+            query_embedding = generate_embedding(query)
+            if query_embedding:
+                semantic_results = repo.similarity_search(
+                    embedding=query_embedding,
+                    empire_id=self.empire_id,
+                    lieutenant_id=lieutenant_id or None,
+                    memory_types=memory_types,
+                    limit=limit,
+                    min_similarity=0.35,
+                )
+                for hit in semantic_results:
+                    entry = hit["memory"]
+                    if entry.id not in seen_ids:
+                        seen_ids.add(entry.id)
+                        merged.append(entry)
+        except Exception:
+            logger.debug("Semantic search failed, falling back to text search")
+
+        # 2. ILIKE text search — fills remaining slots
+        remaining = limit - len(merged)
+        if remaining > 0:
+            text_results = repo.search(
+                query=query,
+                empire_id=self.empire_id,
+                lieutenant_id=lieutenant_id or None,
+                memory_types=memory_types,
+                limit=remaining + 5,  # fetch extra to account for dedup
+            )
+            for entry in text_results:
+                if entry.id not in seen_ids:
+                    seen_ids.add(entry.id)
+                    merged.append(entry)
+                    if len(merged) >= limit:
+                        break
+
+        return merged[:limit]
 
     def recall_for_context(
         self,
