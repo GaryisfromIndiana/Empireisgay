@@ -232,7 +232,8 @@ class AnthropicClient(LLMClient):
         """Format messages for the Anthropic API.
 
         Anthropic uses a different format: system prompt is separate,
-        and tool results have a specific structure.
+        and tool results have a specific structure. Multiple tool results
+        from one turn must be combined into a single user message.
         """
         formatted = []
 
@@ -241,14 +242,19 @@ class AnthropicClient(LLMClient):
                 continue  # System prompt handled separately
 
             if msg.role == "tool":
-                formatted.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": msg.tool_call_id,
-                        "content": msg.content,
-                    }],
-                })
+                # Merge consecutive tool results into one user message
+                tool_block = {
+                    "type": "tool_result",
+                    "tool_use_id": msg.tool_call_id,
+                    "content": msg.content,
+                }
+                if formatted and formatted[-1]["role"] == "user" and isinstance(formatted[-1]["content"], list) and formatted[-1]["content"] and formatted[-1]["content"][0].get("type") == "tool_result":
+                    formatted[-1]["content"].append(tool_block)
+                else:
+                    formatted.append({
+                        "role": "user",
+                        "content": [tool_block],
+                    })
             elif msg.role == "assistant" and msg.tool_calls:
                 content_blocks: list[dict] = []
                 if msg.content:
