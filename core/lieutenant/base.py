@@ -121,11 +121,17 @@ class Lieutenant:
         except Exception as e:
             logger.warning("[%s] Failed to store task outcome: %s", self.name, e)
 
-        # Extract entities for knowledge graph (best-effort)
+        # Extract entities for knowledge graph + store verified facts (best-effort)
         try:
             self._extract_knowledge(result)
         except Exception as e:
             logger.warning("[%s] Failed to extract knowledge: %s", self.name, e)
+
+        # Store verified facts and update source reliability
+        try:
+            self._store_verified_facts(result)
+        except Exception as e:
+            logger.warning("[%s] Failed to store verified facts: %s", self.name, e)
 
         # Memory feedback: boost memories that contributed to good outcomes
         try:
@@ -533,12 +539,31 @@ class Lieutenant:
             pass  # Best-effort
 
     def _extract_knowledge(self, result: TaskResult) -> None:
-        """Extract entities from task results into knowledge graph."""
+        """Extract entities from task results into knowledge graph.
+
+        If the Editor verified claims, entity confidence is adjusted:
+        - Entities mentioned in SUPPORTED claims get full confidence
+        - Entities only in CONTRADICTED claims are skipped
+        - Entities in UNVERIFIABLE claims get reduced confidence (0.4)
+        """
         if not result.success or not result.content:
             return
-        # Skip extraction for very short content (not worth the LLM call)
         if len(result.content) < 200:
             return
+
+        # Build a map of entity_name → best verification status from editor
+        verification_map: dict[str, str] = {}  # entity_name_lower → status
+        editor = getattr(result, "editor_result", None)
+        if editor and hasattr(editor, "claims"):
+            for claim in editor.claims:
+                ename = (claim.entity_name or "").lower()
+                if not ename:
+                    continue
+                current = verification_map.get(ename, "unverified")
+                # supported > unverifiable > unverified > contradicted
+                rank = {"supported": 3, "unverifiable": 2, "unverified": 1, "contradicted": 0}
+                if rank.get(claim.verification_status, 1) > rank.get(current, 1):
+                    verification_map[ename] = claim.verification_status
 
         try:
             from core.knowledge.entities import EntityExtractor
@@ -557,33 +582,48 @@ class Lieutenant:
                 graph = KnowledgeGraph(self.empire_id)
                 resolver = EntityResolver(self.empire_id)
 
-                # Add all entities with resolution and schema mapping
                 added_names = set()
                 for entity in extraction.entities:
                     name = entity.get("name", "").strip()
                     if not name:
                         continue
 
-                    # Map generic type to schema type
                     raw_type = entity.get("entity_type", "concept")
                     mapped_type = map_generic_type(raw_type)
+
+                    # ── KG Gate: adjust confidence based on verification ──
+                    base_confidence = entity.get("confidence", 0.7)
+                    vstatus = verification_map.get(name.lower(), "unverified")
+
+                    if vstatus == "contradicted":
+                        # Block contradicted entities from entering KG
+                        logger.info(
+                            "[%s] KG gate blocked entity '%s' — contradicted by editor",
+                            self.name, name,
+                        )
+                        continue
+                    elif vstatus == "supported":
+                        # Boost confidence for verified entities
+                        base_confidence = min(1.0, base_confidence + 0.15)
+                    elif vstatus == "unverifiable":
+                        # Reduce confidence for unverifiable entities
+                        base_confidence = min(base_confidence, 0.4)
+                    # "unverified" → keep default confidence
 
                     # Resolve against existing entities (fuzzy dedup)
                     resolution = resolver.resolve(name, mapped_type)
                     if resolution.resolved and resolution.match and resolution.match.match_stage <= 2:
-                        # Exact or normalized match — update existing
-                        name = resolution.match.existing_name  # Use canonical name
+                        name = resolution.match.existing_name
 
                     graph.add_entity(
                         name=name,
                         entity_type=mapped_type,
                         description=entity.get("description", ""),
-                        confidence=entity.get("confidence", 0.7),
+                        confidence=base_confidence,
                         source_task_id=result.task_id,
                     )
                     added_names.add(name.lower())
 
-                # Only create relations where both entities exist
                 for relation in extraction.relations:
                     source = relation.get("source", "").strip()
                     target = relation.get("target", "").strip()
@@ -595,6 +635,56 @@ class Lieutenant:
                         )
         except Exception as e:
             logger.debug("Knowledge extraction failed: %s", e)
+
+    def _store_verified_facts(self, result: TaskResult) -> None:
+        """Store editor-verified claims as atomic facts and update source reliability."""
+        editor = getattr(result, "editor_result", None)
+        if not editor or not hasattr(editor, "claims") or not editor.claims:
+            return
+
+        try:
+            from db.engine import session_scope
+            from db.repositories.facts import FactsRepository, SourceReliabilityRepository
+
+            with session_scope() as session:
+                facts_repo = FactsRepository(session)
+                sr_repo = SourceReliabilityRepository(session)
+
+                for claim in editor.claims:
+                    # Store fact
+                    facts_repo.store_fact(
+                        empire_id=self.empire_id,
+                        claim=claim.claim,
+                        evidence=claim.evidence,
+                        category=claim.category,
+                        source_tool=claim.source_tool,
+                        source_name=claim.verification_source or claim.source_tool,
+                        confidence=claim.confidence,
+                        importance=claim.importance,
+                        source_task_id=result.task_id,
+                        lieutenant_id=self.id,
+                        verification_status=claim.verification_status,
+                        verification_source=claim.verification_source,
+                        verification_detail=claim.verification_detail,
+                    )
+
+                    # Update source reliability EMA
+                    if claim.verification_status in ("supported", "contradicted", "unverifiable"):
+                        source_name = claim.source_tool or "unknown"
+                        # Map tool name to readable source name
+                        from core.ace.editor import _source_name_from_tool
+                        readable = _source_name_from_tool(source_name)
+                        sr_repo.record_verification(
+                            self.empire_id, readable, claim.verification_status,
+                        )
+
+                logger.info(
+                    "[%s] Stored %d facts (%d supported, %d contradicted)",
+                    self.name, len(editor.claims),
+                    editor.supported_count, editor.contradicted_count,
+                )
+        except Exception as e:
+            logger.debug("[%s] Failed to store verified facts: %s", self.name, e)
 
     def serialize(self) -> dict:
         """Export lieutenant state for persistence or sharing."""

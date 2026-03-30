@@ -80,6 +80,7 @@ class TaskResult:
     planning_output: dict = field(default_factory=dict)
     execution_output: dict = field(default_factory=dict)
     critic_output: dict = field(default_factory=dict)
+    editor_result: Optional[Any] = None  # EditorResult from the verification stage
 
     # Metrics
     model_used: str = ""
@@ -244,6 +245,7 @@ class ACEEngine:
             if result.content and len(result.content) >= 50:
                 editor_result = self._run_editor(task, execution)
                 result.cost_usd += editor_result.cost_usd if editor_result else 0.0
+                result.editor_result = editor_result
 
             # ── Stage 3: Critic loop ───────────────────────────────────
             critic_failures = 0
