@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -65,3 +66,26 @@ def test_core_runtime_smoke_paths() -> None:
     pricing = PricingEngine()
     cost = pricing.calculate_cost("claude-sonnet-4", tokens_input=1000, tokens_output=500)
     assert cost > 0
+
+
+def test_memory_store_and_recall_roundtrip() -> None:
+    mm = MemoryManager("empire-alpha")
+    marker = f"integration-memory-roundtrip-{uuid.uuid4()}"
+    stored = mm.store(
+        content=f"Roundtrip content marker: {marker}",
+        memory_type="episodic",
+        title="Integration roundtrip test",
+        category="integration_test",
+        importance=0.79,
+        tags=["integration", "roundtrip"],
+        source_type="integration_test",
+    )
+    assert "id" in stored
+
+    recalled = mm.recall(
+        query=marker,
+        memory_types=["episodic"],
+        limit=10,
+        refresh_on_access=False,
+    )
+    assert any(marker in entry.get("content", "") for entry in recalled)

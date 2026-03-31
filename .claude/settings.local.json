@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/opt/homebrew/bin/brew services:*)",
+      "Bash(/opt/homebrew/bin/redis-cli ping:*)",
+      "Bash(git push:*)",
+      "Bash(python3:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(pip3 install:*)",
+      "Bash(curl -s http://localhost:5000/)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:nousresearch.com)",
+      "WebSearch",
+      "WebFetch(domain:sakana.ai)",
+      "WebFetch(domain:agentlaboratory.github.io)",
+      "WebFetch(domain:labs.adaline.ai)",
+      "Bash(/Applications/Postgres.app/Contents/Versions/16/bin/psql -U asd -h localhost -l 2>&1)",
+      "Bash(/Applications/Postgres.app/Contents/Versions/16/bin/psql -U asd -h localhost -c \"CREATE DATABASE empire;\" 2>&1)",
+      "Bash(lsof -ti:5000)",
+      "Bash(xargs kill:*)",
+      "Bash(curl -s http://localhost:5000/api/knowledge/stats)",
+      "Bash(curl -s http://localhost:5000/api/memory/stats)",
+      "WebFetch(domain:www.swebench.com)",
+      "WebFetch(domain:www.tbench.ai)",
+      "WebFetch(domain:empireisgay-production.up.railway.app)",
+      "Bash(curl -s https://empireisgay-production.up.railway.app/api/health)",
+      "Bash(curl:*)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(sed -i '' 's/data = request.get_json\\(\\)/data = request.get_json\\(silent=True\\) or {}/g' \"$f\")",
+      "Bash(echo \"Fixed: $f\")",
+      "Bash(done)",
+      "Bash(sed -i '' 's/request\\\\.args\\\\.get\\(\"\"limit\"\", \\\\\\([0-9]*\\\\\\)\\)/request.args.get\\(\"\"limit\"\", \\\\1, type=int\\)/g' web/routes/api.py)",
+      "Bash(sed -i '' 's/request\\\\.args\\\\.get\\(\"\"depth\"\", \\\\\\([0-9]*\\\\\\)\\)/request.args.get\\(\"\"depth\"\", \\\\1, type=int\\)/g' web/routes/api.py)",
+      "Bash(sed -i '' 's/request\\\\.args\\\\.get\\(\"\"days\"\", \\\\\\([0-9]*\\\\\\)\\)/request.args.get\\(\"\"days\"\", \\\\1, type=int\\)/g' web/routes/api.py)",
+      "Bash(python3 -c \":*)",
+      "Skill(update-config)"
+    ]
+  }
+}

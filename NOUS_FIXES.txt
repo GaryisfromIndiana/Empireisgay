@@ -1,0 +1,325 @@
+============================================================
+FIX 1 OF 3: core/directives/manager.py
+============================================================
+
+PROBLEM: In execute_directive(), line 230 calls find_best_lieutenant()
+once per task inside a loop. Each call opens 2 DB sessions via _get_repo().
+A directive with 12 tasks = 24 sessions fast. ThreadPoolExecutor on line 254
+then spawns threads that open MORE sessions. This exhausts the connection pool.
+
+FIX: Fetch active lieutenants ONCE, score in-memory. Wrap thread workers in try/finally.
+
+CURRENT CODE (lines 226-251):
+            # Assign lieutenants to tasks before execution
+            from core.ace.engine import TaskInput
+            task_assignments = []
+            for task_data in tasks:
+                lt = lt_manager.find_best_lieutenant(task_data.get("description", ""))
+                if not lt:
+                    logger.warning("No lieutenant found for task: %s", task_data.get("title", "?")[:50])
+                    wave_task_results.append({
+                        "title": task_data.get("title", ""),
+                        "success": False,
+                        "error": "No lieutenant available",
+                        "quality_score": 0,
+                        "cost_usd": 0,
+                    })
+                    continue
+                task_assignments.append((task_data, lt))
+
+            # Execute tasks in parallel within the wave
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from config.settings import get_settings
+
+            def _execute_one(task_data_and_lt):
+                td, lt = task_data_and_lt
+                task = TaskInput(title=td.get("title", ""), description=td.get("description", ""))
+                result = lt.execute_task(task)
+                return td, lt, result
+
+REPLACE WITH:
+            # Assign lieutenants to tasks before execution
+            from core.ace.engine import TaskInput
+            task_assignments = []
+
+            # FIX: Fetch active lieutenants ONCE instead of per-task DB query
+            repo_lt = lt_manager._get_repo()
+            try:
+                active_lts = repo_lt.get_by_empire(lt_manager.empire_id, status="active")
+            finally:
+                lt_manager._close_repo(repo_lt)
+
+            for task_data in tasks:
+                desc_lower = task_data.get("description", "").lower()
+                best_lt_db = None
+                best_score = -1
+
+                for db_lt in active_lts:
+                    score = 0.0
+                    if db_lt.domain and db_lt.domain.lower() in desc_lower:
+                        score += 0.35
+                    specs = db_lt.specializations_json or []
+                    matched = sum(1 for s in specs if s.lower() in desc_lower)
+                    score += min(0.3, matched * 0.1)
+                    score += db_lt.performance_score * 0.1
+                    if db_lt.current_task_id:
+                        score -= 0.1
+                    if score > best_score:
+                        best_score = score
+                        best_lt_db = db_lt
+
+                if not best_lt_db:
+                    if active_lts:
+                        best_lt_db = active_lts[0]
+                    else:
+                        wave_task_results.append({
+                            "title": task_data.get("title", ""),
+                            "success": False,
+                            "error": "No lieutenant available",
+                            "quality_score": 0,
+                            "cost_usd": 0,
+                        })
+                        continue
+
+                lt = lt_manager.get_lieutenant(best_lt_db.id)
+                if lt:
+                    task_assignments.append((task_data, lt))
+
+            # Execute tasks in parallel within the wave
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from config.settings import get_settings
+
+            def _execute_one(task_data_and_lt):
+                td, lt = task_data_and_lt
+                try:
+                    task = TaskInput(title=td.get("title", ""), description=td.get("description", ""))
+                    result = lt.execute_task(task)
+                    return td, lt, result
+                except Exception:
+                    raise  # Re-raise but ensure no silent session leaks
+
+
+============================================================
+FIX 2 OF 3: core/warroom/session.py
+============================================================
+
+PROBLEM: In run_planning_phase(), lines 196-233 have a BROKEN INDENTATION.
+The prompt= and try/except blocks are OUTSIDE the for loop. Only the LAST
+participant gets a plan generated. It should run once PER participant.
+
+CURRENT CODE (lines 164-236):
+    def run_planning_phase(self, directive_title: str, directive_description: str) -> dict:
+        self.state = SessionState.PLANNING
+        self._add_message("system", "War Room", f"Planning phase: {directive_title}", "system")
+
+        plans = []
+        from llm.base import LLMRequest, LLMMessage
+        from llm.router import ModelRouter, TaskMetadata
+        from db.engine import get_session
+        from db.repositories.lieutenant import LieutenantRepository
+
+        router = ModelRouter()
+        session_db = get_session()
+        try:
+            lt_repo = LieutenantRepository(session_db)
+
+            for participant in self.participants:
+                db_lt = lt_repo.get(participant["id"])
+                if not db_lt:
+                    continue
+
+                persona = db_lt.persona_json or {}
+                system_prompt = persona.get("system_prompt_template", f"You are {db_lt.name}, an expert in {db_lt.domain}.")
+
+            prompt = (                    # <-- BUG: THIS IS OUTSIDE THE FOR LOOP
+                f"Create a plan for this directive from your {db_lt.domain} perspective:\n\n"
+                f"Directive: {directive_title}\n{directive_description}\n\n"
+                f"Propose specific tasks with their order and who should handle them. Be concise."
+            )
+
+            try:                          # <-- BUG: ALSO OUTSIDE THE FOR LOOP
+                request = LLMRequest(
+                    messages=[LLMMessage.user(prompt)],
+                    system_prompt=system_prompt,
+                    temperature=0.4,
+                    max_tokens=1500,
+                )
+                response = router.execute(request, TaskMetadata(task_type="planning", complexity="moderate"))
+
+                plans.append({
+                    "lieutenant_id": participant["id"],
+                    "name": participant.get("name", db_lt.name),
+                    "domain": participant.get("domain", db_lt.domain),
+                    "plan": response.content,
+                    "quality": 0.7,
+                })
+                self._add_message(
+                    participant["id"],
+                    participant.get("name", db_lt.name),
+                    response.content[:500],
+                    "proposal",
+                )
+                self._total_cost += response.cost_usd
+            except Exception as e:
+                logger.warning("Planning failed for %s: %s", db_lt.name, e)
+                plans.append({
+                    "lieutenant_id": participant["id"],
+                    "name": db_lt.name,
+                    "domain": db_lt.domain,
+                    "plan": f"Planning error: {e}",
+                    "quality": 0.0,
+                })
+
+        finally:
+            session_db.close()
+
+REPLACE WITH:
+    def run_planning_phase(self, directive_title: str, directive_description: str) -> dict:
+        self.state = SessionState.PLANNING
+        self._add_message("system", "War Room", f"Planning phase: {directive_title}", "system")
+
+        plans = []
+        from llm.base import LLMRequest, LLMMessage
+        from llm.router import ModelRouter, TaskMetadata
+        from db.engine import get_session
+        from db.repositories.lieutenant import LieutenantRepository
+
+        router = ModelRouter()
+        session_db = get_session()
+        try:
+            lt_repo = LieutenantRepository(session_db)
+
+            for participant in self.participants:
+                db_lt = lt_repo.get(participant["id"])
+                if not db_lt:
+                    continue
+
+                persona = db_lt.persona_json or {}
+                system_prompt = persona.get("system_prompt_template", f"You are {db_lt.name}, an expert in {db_lt.domain}.")
+
+                prompt = (                # <-- FIX: NOW INSIDE THE FOR LOOP
+                    f"Create a plan for this directive from your {db_lt.domain} perspective:\n\n"
+                    f"Directive: {directive_title}\n{directive_description}\n\n"
+                    f"Propose specific tasks with their order and who should handle them. Be concise."
+                )
+
+                try:                      # <-- FIX: NOW INSIDE THE FOR LOOP
+                    request = LLMRequest(
+                        messages=[LLMMessage.user(prompt)],
+                        system_prompt=system_prompt,
+                        temperature=0.4,
+                        max_tokens=1500,
+                    )
+                    response = router.execute(request, TaskMetadata(task_type="planning", complexity="moderate"))
+
+                    plans.append({
+                        "lieutenant_id": participant["id"],
+                        "name": participant.get("name", db_lt.name),
+                        "domain": participant.get("domain", db_lt.domain),
+                        "plan": response.content,
+                        "quality": 0.7,
+                    })
+                    self._add_message(
+                        participant["id"],
+                        participant.get("name", db_lt.name),
+                        response.content[:500],
+                        "proposal",
+                    )
+                    self._total_cost += response.cost_usd
+                except Exception as e:
+                    logger.warning("Planning failed for %s: %s", db_lt.name, e)
+                    plans.append({
+                        "lieutenant_id": participant["id"],
+                        "name": db_lt.name,
+                        "domain": db_lt.domain,
+                        "plan": f"Planning error: {e}",
+                        "quality": 0.0,
+                    })
+
+        finally:
+            session_db.close()
+
+
+============================================================
+FIX 3 OF 3: web/routes/god_panel.py
+============================================================
+
+PROBLEM: DIRECTIVE and WARROOM actions spawn raw threading.Thread(daemon=True).
+These threads have no Flask app context, so DB operations silently fail. If the
+thread crashes, the directive gets stuck in "executing" status forever.
+
+CURRENT CODE (lines 286-311):
+            directive_id = directive.get("id", "")
+            if directive_id:
+                def run_bg():
+                    dm2 = DirectiveManager(empire_id)
+                    dm2.execute_directive(directive_id)
+                threading.Thread(target=run_bg, daemon=True).start()
+
+            result["status"] = "executing"
+            result["directive_id"] = directive_id
+            result["message"] = "Directive created and executing in background"
+
+        elif action == "WARROOM":
+            from core.directives.manager import DirectiveManager
+            dm = DirectiveManager(empire_id)
+            directive = dm.create_directive(
+                title=f"Debate: {topic}",
+                description=f"War Room debate: {description}. Each lieutenant argues from their domain perspective. Synthesize into a unified assessment.",
+                priority=priority,
+                source="god_panel",
+            )
+            directive_id = directive.get("id", "")
+            if directive_id:
+                def run_bg():
+                    dm2 = DirectiveManager(empire_id)
+                    dm2.execute_directive(directive_id)
+                threading.Thread(target=run_bg, daemon=True).start()
+
+REPLACE WITH:
+            directive_id = directive.get("id", "")
+            if directive_id:
+                app = current_app._get_current_object()
+                def run_bg(app_ref=app, eid=empire_id, did=directive_id):
+                    with app_ref.app_context():
+                        try:
+                            dm2 = DirectiveManager(eid)
+                            dm2.execute_directive(did)
+                        except Exception as e:
+                            logger.error("Background directive %s failed: %s", did, e)
+                            try:
+                                dm3 = DirectiveManager(eid)
+                                dm3.cancel_directive(did)
+                            except Exception:
+                                pass
+                threading.Thread(target=run_bg, daemon=True).start()
+
+            result["status"] = "executing"
+            result["directive_id"] = directive_id
+            result["message"] = "Directive created and executing in background"
+
+        elif action == "WARROOM":
+            from core.directives.manager import DirectiveManager
+            dm = DirectiveManager(empire_id)
+            directive = dm.create_directive(
+                title=f"Debate: {topic}",
+                description=f"War Room debate: {description}. Each lieutenant argues from their domain perspective. Synthesize into a unified assessment.",
+                priority=priority,
+                source="god_panel",
+            )
+            directive_id = directive.get("id", "")
+            if directive_id:
+                app = current_app._get_current_object()
+                def run_bg(app_ref=app, eid=empire_id, did=directive_id):
+                    with app_ref.app_context():
+                        try:
+                            dm2 = DirectiveManager(eid)
+                            dm2.execute_directive(did)
+                        except Exception as e:
+                            logger.error("Background warroom %s failed: %s", did, e)
+                            try:
+                                dm3 = DirectiveManager(eid)
+                                dm3.cancel_directive(did)
+                            except Exception:
+                                pass
+                threading.Thread(target=run_bg, daemon=True).start()
