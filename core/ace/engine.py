@@ -501,7 +501,13 @@ Please produce an improved version addressing the feedback above.
 ## Instructions
 Execute the task thoroughly and produce high-quality output.
 Be specific, accurate, and comprehensive.
-Cite sources or reasoning where applicable.
+
+**Source citation requirements** (IMPORTANT):
+- For every key claim, include an inline source reference: (Source: <name>) or [<URL>]
+- When you get data from a tool, attribute it: e.g. "(Source: HuggingFace model card)",
+  "(Source: GitHub README)", "(Source: Tavily search)"
+- At the end of your response, include a "## Sources" section listing all sources used
+- Claims without sources will be flagged by the quality system
 """
 
         # Add tool usage instructions if tools are available
@@ -513,6 +519,7 @@ Cite sources or reasoning where applicable.
 You have {len(tool_definitions)} tools available. Use them to gather information,
 search the web, recall memories, look up knowledge, and interact with external systems.
 Call tools when you need real data — don't guess or hallucinate facts.
+When you use a tool, note which tool/source provided the data so you can cite it.
 """
 
         model = task.model_override or self._execution_model
@@ -669,12 +676,15 @@ Requirements: {', '.join(task.requirements) if task.requirements else 'None spec
 
 ## Instructions
 Evaluate the output quality on these dimensions (score 0.0 to 1.0):
-1. **Confidence** — How confident is the output in its claims? Does it cite sources or data?
+1. **Confidence** — Does the output back up its claims with data, sources, or citations?
+   Score based on HOW WELL claims are attributed, not whether YOU recognize the sources.
+   Inline citations like "(Source: HuggingFace)" or URLs count. A ## Sources section counts.
+   Score 0.7+ if most key claims have source attribution.
 2. **Completeness** — Does it address all requirements?
 3. **Coherence** — Is it logically consistent and well-structured?
 4. **Accuracy** — Is the reasoning sound? Are claims internally consistent?
    (Do NOT mark down for mentioning models or events you haven't heard of —
-   the research agent has live data access.)
+   the research agent has access to live data that you do not.)
 
 Also identify:
 - Any issues or problems (structural, logical, or missing coverage — NOT unfamiliarity)

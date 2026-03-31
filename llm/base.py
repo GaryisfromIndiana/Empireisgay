@@ -362,7 +362,10 @@ class LLMClient(ABC):
                 messages.append(LLMMessage.user(
                     "Now synthesize all the information gathered from the tool calls above "
                     "into a comprehensive, well-structured response. Do not attempt to call "
-                    "any more tools — just write the final answer."
+                    "any more tools — just write the final answer.\n\n"
+                    "IMPORTANT: Include inline source citations for key claims, e.g. "
+                    "(Source: HuggingFace) or (Source: GitHub). End with a ## Sources section "
+                    "listing all sources used."
                 ))
                 final_req = LLMRequest(
                     messages=messages,
