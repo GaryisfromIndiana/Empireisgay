@@ -338,10 +338,8 @@ Return ONLY the JSON array, no other text."""
 
         verify_tool = _get_verify_tool(claim.source_tool)
 
-        # Build a targeted search query from the claim
-        query = claim.claim
-        if claim.entity_name:
-            query = f"{claim.entity_name} {claim.claim[:80]}"
+        # Build a SHORT, focused query — not the full claim text
+        query = self._build_verify_query(claim)
 
         # Determine appropriate arguments based on tool type
         args = self._build_verify_args(verify_tool, query, claim)
@@ -371,74 +369,151 @@ Return ONLY the JSON array, no other text."""
             claim.verification_status = "unverifiable"
             claim.verification_detail = str(e)
 
+    def _build_verify_query(self, claim: VerifiedClaim) -> str:
+        """Build a short, focused verification query from a claim.
+
+        Instead of passing the full claim text, extract the entity name
+        and the key attribute being claimed for a targeted search.
+        """
+        import re
+
+        entity = claim.entity_name or ""
+        # Extract the most important number from the claim (at least 2 digits, or has suffix)
+        numbers = re.findall(r'\b(\d{2,}[\d,.]*\s*[BMKbmkTt]?)\b', claim.claim)
+        key_number = numbers[0].strip() if numbers else ""
+
+        # Extract key attribute words (parameter, license, release, download, etc.)
+        attr_words = []
+        for word in ["parameter", "license", "release", "download", "architecture",
+                      "benchmark", "context", "token", "price", "cost", "accuracy",
+                      "score", "training", "MoE", "dense", "sparse"]:
+            if word.lower() in claim.claim.lower():
+                attr_words.append(word)
+
+        # Build focused query: "DeepSeek V3.2 685B parameters"
+        parts = [entity]
+        if key_number:
+            parts.append(key_number)
+        if attr_words:
+            parts.append(attr_words[0])
+
+        query = " ".join(p for p in parts if p).strip()
+        # Fallback: use entity name + first few words
+        if len(query) < 5:
+            query = claim.claim[:60]
+
+        return query[:80]
+
     def _build_verify_args(self, tool: str, query: str, claim: VerifiedClaim) -> dict:
         """Build appropriate arguments for a verification tool call."""
-        short_query = query[:120]
-
         if "search_repositories" in tool:
-            return {"query": short_query, "perPage": 3}
+            return {"query": query, "perPage": 3}
         elif "search_huggingface" in tool or "hub_repo_search" in tool:
-            return {"query": claim.entity_name or short_query[:60], "type": "model", "limit": 3}
+            return {"query": claim.entity_name or query[:60], "type": "model", "limit": 3}
         elif "hub_repo_details" in tool:
-            return {"repo_id": claim.entity_name} if claim.entity_name else {"query": short_query}
+            return {"repo_id": claim.entity_name} if claim.entity_name else {"query": query}
         elif "paper_search" in tool:
-            return {"query": short_query, "limit": 3}
+            return {"query": query, "limit": 3}
         elif "tavily" in tool:
-            return {"query": short_query, "max_results": 3}
+            return {"query": query, "max_results": 3}
         elif "web_search" in tool:
-            return {"query": short_query, "max_results": 3}
+            return {"query": query, "max_results": 3}
         else:
-            return {"query": short_query}
+            return {"query": query}
 
     def _score_verification(self, claim: VerifiedClaim, verification_result: str) -> None:
-        """Determine if verification result supports, contradicts, or is inconclusive."""
-        result_lower = verification_result.lower()
-        claim_lower = claim.claim.lower()
+        """Determine if verification result supports, contradicts, or is inconclusive.
 
-        # Extract key terms from the claim for matching
+        Uses a two-tier approach:
+        1. Entity presence: is the entity mentioned at all in the result?
+        2. Attribute confirmation: do key numbers/attributes match?
+
+        This is more lenient than pure exact-match because verification
+        tools return different formats (685B vs 685 billion vs 685,396.9M).
+        """
         import re
-        numbers = re.findall(r'\b\d[\d,.]*[BMKbmk]?\b', claim.claim)
-        key_names = [w for w in claim.claim.split() if w[0:1].isupper() and len(w) > 2]
+        result_lower = verification_result.lower()
 
-        # Check if key terms appear in verification result
-        name_matches = sum(1 for name in key_names if name.lower() in result_lower)
-        number_matches = sum(1 for num in numbers if num.lower() in result_lower)
+        # Tier 1: Check if the entity is even mentioned
+        entity = (claim.entity_name or "").lower()
+        entity_parts = [p for p in entity.replace("-", " ").replace(".", " ").split() if len(p) > 2]
+        entity_found = False
+        if entity_parts:
+            entity_matches = sum(1 for p in entity_parts if p in result_lower)
+            entity_found = entity_matches >= len(entity_parts) * 0.5
 
-        total_key_terms = len(key_names) + len(numbers)
-        if total_key_terms == 0:
+        if not entity_found and entity:
+            # Try compact form: "deepseekv3" in "deepseek-v3.2"
+            compact = entity.replace(" ", "").replace("-", "").replace(".", "")
+            if len(compact) > 4 and compact in result_lower.replace(" ", "").replace("-", "").replace(".", ""):
+                entity_found = True
+
+        if not entity_found:
             claim.verification_status = "unverifiable"
-            claim.verification_detail = "No specific terms to verify"
+            claim.verification_detail = "Entity not found in verification source"
             return
 
-        match_rate = (name_matches + number_matches) / total_key_terms
+        # Tier 2: Check key numbers and attributes
+        # Extract significant numbers from claim (3+ digits to skip version numbers)
+        claim_nums_raw = re.findall(r'\b(\d{3,}[\d,.]*)\s*[BMKbmkTt]?\b', claim.claim)
+        claim_nums = set()
+        for n in claim_nums_raw:
+            clean = n.replace(",", "").rstrip(".")
+            claim_nums.add(clean)
+            if "." in clean:
+                claim_nums.add(clean.split(".")[0])
 
-        if match_rate >= 0.5:
+        # Check if claim numbers appear as substrings in the result
+        # This handles "685B" matching "685,396.9M" or "685 billion"
+        result_clean = verification_result.replace(",", "")
+        number_matches = set()
+        for n in claim_nums:
+            if n in result_clean:
+                number_matches.add(n)
+
+        has_numbers = len(claim_nums) > 0
+
+        # Check key attribute words
+        attr_words = ["mit", "apache", "license", "moe", "dense", "sparse", "transformer",
+                      "parameter", "context", "128k", "64k", "32k", "open-source", "open source"]
+        claim_attrs = [w for w in attr_words if w in claim.claim.lower()]
+        matched_attrs = [w for w in claim_attrs if w in result_lower]
+
+        # Score decision
+        if has_numbers and number_matches:
+            # Entity found AND key numbers match → strong support
             claim.verification_status = "supported"
             claim.confidence = min(1.0, claim.confidence + 0.2)
             claim.verification_detail = (
-                f"Key terms confirmed in independent source ({name_matches} names, "
-                f"{number_matches} numbers matched)"
+                f"Entity confirmed, numbers matched: {number_matches}"
             )
-        elif match_rate >= 0.2:
-            # Partial match — check for contradictory numbers
-            contradicted = False
-            for num in numbers:
-                # Look for the same metric with a different value
-                entity = claim.entity_name.lower() if claim.entity_name else ""
-                if entity and entity in result_lower and num.lower() not in result_lower:
-                    # Entity found but number doesn't match — possible contradiction
-                    contradicted = True
-                    break
-
-            if contradicted:
+        elif not has_numbers and matched_attrs:
+            # No numbers to check, but key attributes match → supported
+            claim.verification_status = "supported"
+            claim.confidence = min(1.0, claim.confidence + 0.15)
+            claim.verification_detail = (
+                f"Entity confirmed, attributes matched: {matched_attrs}"
+            )
+        elif not has_numbers and not claim_attrs:
+            # Entity found, no specific attributes to verify → weak support
+            claim.verification_status = "supported"
+            claim.confidence = min(1.0, claim.confidence + 0.1)
+            claim.verification_detail = "Entity confirmed in independent source"
+        elif has_numbers and not number_matches:
+            # Entity found but claimed numbers not present — possible contradiction
+            # Only flag as contradicted if the result has OTHER numbers for the same metric
+            result_has_numbers = bool(re.findall(r'\b\d{3,}[\d,.]*\s*[BMKbmkTt]?\b', verification_result))
+            if result_has_numbers:
                 claim.verification_status = "contradicted"
                 claim.confidence = max(0.1, claim.confidence - 0.3)
                 claim.verification_detail = (
-                    f"Entity found in verification source but key metrics differ"
+                    f"Entity found but claimed numbers ({claim_nums}) not confirmed — "
+                    f"source has different values"
                 )
             else:
                 claim.verification_status = "unverifiable"
-                claim.verification_detail = "Partial match — insufficient evidence to confirm or deny"
+                claim.verification_detail = "Entity found but no numeric data in source to compare"
         else:
+            # Entity found but can't confirm specific claims
             claim.verification_status = "unverifiable"
-            claim.verification_detail = "Claim not found in verification source"
+            claim.verification_detail = "Entity found but specific attributes not confirmed"
