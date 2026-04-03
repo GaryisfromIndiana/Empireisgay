@@ -194,6 +194,7 @@ class QdrantSettings(BaseSettings):
     hnsw_m: int = Field(default=16, ge=4, le=64)
     hnsw_ef: int = Field(default=100, ge=50, le=500)
     on_disk: bool = False
+    batch_upsert_size: int = Field(default=100, ge=1, le=1000)
 
 
 class KnowledgeSettings(BaseSettings):

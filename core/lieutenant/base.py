@@ -69,10 +69,7 @@ class Lieutenant:
         self.empire_id = empire_id
         self.persona = persona
         self.domain = domain or persona.domain
-        self.ace = ace_engine or ACEEngine(
-            empire_id=empire_id,
-            lieutenant_id=lieutenant_id,
-        )
+        self.ace = ace_engine or ACEEngine()
         self.memory = MemoryManager(empire_id)
 
         # Internal tracking
@@ -390,8 +387,9 @@ class Lieutenant:
         # KG facts are NOT pre-loaded — agents use the lookup_knowledge tool
         # on-demand, which avoids stuffing ~2000 tokens of potentially
         # irrelevant context into every prompt.
-        context_parts = [self.persona.build_system_prompt()]
-        context_parts.append(f"\nDomain: {self.domain}")
+        persona_core = self.persona.build_system_prompt() + f"\nDomain: {self.domain}"
+
+        context_parts = [persona_core]
 
         # Inject MCP tool guidance so the LLM knows what external tools are available
         mcp_guidance = self._build_mcp_guidance()
@@ -404,7 +402,7 @@ class Lieutenant:
         context = ACEContext(
             persona_prompt="\n".join(context_parts),
             domain_context=f"Domain: {self.domain}",
-            metadata={"task_query": task_query[:200]},
+            metadata={"task_query": task_query[:200], "persona_core": persona_core},
         )
 
         return context

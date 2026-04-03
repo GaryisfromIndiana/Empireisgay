@@ -196,7 +196,7 @@ class ACEEngine:
         # Stage-differentiated prompts: only the executor needs full context.
         # Planner gets minimal context (persona + domain), critic uses its own.
         exec_prompt = context.build_system_prompt()
-        planning_prompt = context.persona_prompt.split("\n## ")[0] if context.persona_prompt else ""
+        planning_prompt = context.metadata.get("persona_core", "") or exec_prompt
 
         try:
             # ── Stage 1: Planning (skip for short/simple tasks) ────────

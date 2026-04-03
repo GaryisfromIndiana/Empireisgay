@@ -725,7 +725,7 @@ class KnowledgeGraph:
                 except Exception as e:
                     logger.debug("Facts lookup failed in context window: %s", e)
 
-        repo.commit()  # persist access_count bumps
+            repo.commit()  # persist access_count bumps
 
         if not sections:
             return ""
