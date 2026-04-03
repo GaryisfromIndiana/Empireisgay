@@ -386,21 +386,10 @@ class Lieutenant:
         except Exception as e:
             logger.debug("[%s] Memory context build failed: %s", self.name, e)
 
-        # Get relevant knowledge graph context (entities + relations + facts)
-        knowledge_context = ""
-        try:
-            from core.knowledge.graph import KnowledgeGraph
-            graph = KnowledgeGraph(self.empire_id)
-            knowledge_context = graph.get_context_window(
-                query=task_query[:200],
-                token_budget=2000,
-                include_relations=True,
-                include_facts=True,
-            )
-        except Exception as e:
-            logger.debug("[%s] KG context build failed: %s", self.name, e)
-
-        # Build the full context
+        # Build the full context.
+        # KG facts are NOT pre-loaded — agents use the lookup_knowledge tool
+        # on-demand, which avoids stuffing ~2000 tokens of potentially
+        # irrelevant context into every prompt.
         context_parts = [self.persona.build_system_prompt()]
         context_parts.append(f"\nDomain: {self.domain}")
 
@@ -411,8 +400,6 @@ class Lieutenant:
 
         if memory_context:
             context_parts.append(f"\n{memory_context}")
-        if knowledge_context:
-            context_parts.append(f"\n{knowledge_context}")
 
         context = ACEContext(
             persona_prompt="\n".join(context_parts),

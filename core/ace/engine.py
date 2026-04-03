@@ -193,7 +193,10 @@ class ACEEngine:
         start_time = time.time()
         result = TaskResult(task_id=task.id)
 
-        system_prompt = context.build_system_prompt()
+        # Stage-differentiated prompts: only the executor needs full context.
+        # Planner gets minimal context (persona + domain), critic uses its own.
+        exec_prompt = context.build_system_prompt()
+        planning_prompt = context.persona_prompt.split("\n## ")[0] if context.persona_prompt else ""
 
         try:
             # ── Stage 1: Planning (skip for short/simple tasks) ────────
@@ -203,14 +206,14 @@ class ACEEngine:
             if skip_planning:
                 plan = {"plan": "Direct execution (simple task)", "cost": 0.0, "tokens": 0}
             else:
-                plan = self._run_planning(task, system_prompt, context)
+                plan = self._run_planning(task, planning_prompt, context)
 
             result.planning_output = plan
             result.cost_usd += plan.get("cost", 0.0)
             result.tokens_input += plan.get("tokens", 0)
 
             # ── Stage 2: Execution ─────────────────────────────────────
-            execution = self._run_execution(task, plan, system_prompt, context)
+            execution = self._run_execution(task, plan, exec_prompt, context)
             result.execution_output = execution
             result.content = execution.get("content", "")
             result.cost_usd += execution.get("cost", 0.0)
@@ -222,7 +225,7 @@ class ACEEngine:
             for iteration in range(self._max_iterations):
                 result.pipeline_iterations = iteration + 1
 
-                critic_eval = self._run_critic(task, execution, system_prompt)
+                critic_eval = self._run_critic(task, execution)
                 result.critic_output = critic_eval
                 result.quality_score = critic_eval.get("overall_score", 0.0)
                 result.quality_details = critic_eval
@@ -265,7 +268,7 @@ class ACEEngine:
                     feedback = critic_eval.get("suggestions", [])
                     issues = critic_eval.get("issues", [])
                     execution = self._run_execution(
-                        task, plan, system_prompt, context,
+                        task, plan, exec_prompt, context,
                         previous_output=execution,
                         feedback=feedback,
                         issues=issues,
@@ -489,7 +492,6 @@ Cite sources or reasoning where applicable.
         self,
         task: TaskInput,
         execution: dict,
-        system_prompt: str,
     ) -> dict:
         """Run the critic agent to evaluate the output quality."""
         content = execution.get("content", "")

@@ -256,7 +256,6 @@ class CriticStage(PipelineStage):
                 critic = self._engine._run_critic(
                     task,
                     context.execution_output or {},
-                    context.system_prompt,
                 )
             else:
                 critic = {"overall_score": 0.5, "approved": False}
