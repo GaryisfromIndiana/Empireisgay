@@ -406,7 +406,10 @@ class KnowledgeEntity(Base):
     source_task_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     source_type: Mapped[str] = mapped_column(String(32), default="extraction")  # extraction, manual, import, bridge
 
-    embedding_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Deferred: a 1536-float JSON array (~25KB/row). Loading it for every
+    # SELECT * was a significant chunk of the OOM problem. Callers that need
+    # it (vector search, PageRank seeding) must opt-in with .undefer().
+    embedding_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, deferred=True)
     tags_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -633,7 +636,8 @@ class MemoryEntry(Base):
     decay_factor: Mapped[float] = mapped_column(Float, default=1.0)  # 1.0 = no decay, 0.0 = fully decayed
     effective_importance: Mapped[float] = mapped_column(Float, default=0.5)  # importance * decay
 
-    embedding_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Deferred — same reasoning as KnowledgeEntity.embedding_json.
+    embedding_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, deferred=True)
 
     source_task_id: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     source_type: Mapped[str] = mapped_column(String(32), default="task")  # task, reflection, import, manual, promotion

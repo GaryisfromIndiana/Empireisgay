@@ -30,6 +30,12 @@ def create_app(config: dict | None = None) -> Flask:
     from config.settings import get_settings
     settings = get_settings()
 
+    # Configure logging so core.* loggers reach Railway stdout.
+    # Without this, only WARNING+ gets through (Python root default) because
+    # basicConfig was only called from main(), which gunicorn never invokes.
+    from utils.logging import setup_logging
+    setup_logging(level=settings.log_level)
+
     app.config["SECRET_KEY"] = settings.flask_secret_key
     app.config["DEBUG"] = settings.flask_debug
     app.config["EMPIRE_ID"] = settings.empire_id

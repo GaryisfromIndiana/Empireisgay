@@ -104,28 +104,6 @@ def api_list_lieutenants(empire_id):
     )
 
 
-@api_bp.route("/lieutenants/gaps")
-@empire_route
-def api_lieutenant_gaps(empire_id):
-    """Detect topic clusters that need new specialist lieutenants."""
-    from core.knowledge.maintenance import KnowledgeMaintainer
-    gaps = KnowledgeMaintainer(empire_id).detect_lieutenant_gaps(min_cluster_size=5)
-    return {"gaps": gaps, "count": len(gaps)}
-
-
-@api_bp.route("/lieutenants/auto-spawn", methods=["POST"])
-@rate_limit(requests_per_minute=2, requests_per_hour=5)
-@empire_route
-def api_auto_spawn(empire_id):
-    """Auto-spawn lieutenants for uncovered topic clusters."""
-    data = _get_json_or_400()
-    from core.knowledge.maintenance import KnowledgeMaintainer
-    spawned = KnowledgeMaintainer(empire_id).auto_spawn_lieutenants(
-        max_spawns=min(data.get("max_spawns", 2), 5),
-    )
-    return {"spawned": spawned, "count": len(spawned)}
-
-
 @api_bp.route("/lieutenants", methods=["POST"])
 @empire_route
 def api_create_lieutenant(empire_id):

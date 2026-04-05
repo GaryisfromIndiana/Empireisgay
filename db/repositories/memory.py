@@ -391,12 +391,20 @@ class MemoryRepository(BaseRepository[MemoryEntry]):
             logger.debug("Qdrant memory search unavailable, falling back to SQL: %s", e)
 
         # ── Fallback: in-memory cosine similarity ─────────────────
+        # Cap loaded rows to avoid loading the entire embedding table into
+        # memory every time Qdrant is stale — 500 × 25KB = 12MB max.
+        # Order by effective_importance so the best candidates are kept.
+        # embedding_json is deferred at the ORM level, so we must undefer here.
+        from sqlalchemy.orm import undefer
         stmt = (
             select(MemoryEntry)
+            .options(undefer(MemoryEntry.embedding_json))
             .where(and_(
                 MemoryEntry.empire_id == empire_id,
                 MemoryEntry.embedding_json.is_not(None),
             ))
+            .order_by(MemoryEntry.effective_importance.desc())
+            .limit(500)
         )
         if lieutenant_id:
             stmt = stmt.where(MemoryEntry.lieutenant_id == lieutenant_id)

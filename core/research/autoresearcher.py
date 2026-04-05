@@ -587,17 +587,17 @@ Rules:
             max_tokens=1500,
         )
 
-        try:
-            response = router.execute(request, metadata)
-            return (
-                self._parse_entities(response.content),
-                float(response.cost_usd or 0.0),
-                int(response.total_tokens or 0),
-                response.model or "",
-            )
-        except Exception as exc:
-            logger.error("Entity extraction failed: %s", exc)
-            return [], 0.0, 0, ""
+        # Don't silently swallow LLM failures — previously this returned
+        # ([],0.0,0,"") on any exception which marked tasks success=True with
+        # cost=$0, quality=0, model=None. Let the outer _execute_research
+        # handler route real failures through _fail_task with a proper error.
+        response = router.execute(request, metadata)
+        return (
+            self._parse_entities(response.content),
+            float(response.cost_usd or 0.0),
+            int(response.total_tokens or 0),
+            response.model or "",
+        )
 
     def _parse_entities(self, raw: str) -> list[dict]:
         """Parse entity extraction JSON response."""

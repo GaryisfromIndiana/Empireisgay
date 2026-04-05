@@ -286,31 +286,50 @@ class DirectiveManager:
                             "cost_usd": 0,
                         })
 
-            # Batch insert all task records in ONE session per wave
+            # Batch insert all task records in ONE session per wave.
+            # IMPORTANT: last_error MUST be set when status='failed', otherwise
+            # the row is unactionable — this was the 27-tasks-NULL-error bug.
             try:
                 from db.models import Task as TaskModel
                 from db.engine import session_scope
-                with session_scope() as db_session:
-                    for item in task_records:
-                        r = item["result"]
-                        td = item["task_data"]
-                        db_session.add(TaskModel(
-                            directive_id=directive_id,
-                            lieutenant_id=item["lt_id"],
-                            title=td.get("title", "")[:256],
-                            description=td.get("description", "")[:5000],
-                            status="completed" if r.success else "failed",
-                            wave_number=wave_num,
-                            cost_usd=r.cost_usd,
-                            quality_score=r.quality_score,
-                            model_used=r.model_used,
-                            tokens_input=r.tokens_input,
-                            tokens_output=r.tokens_output,
-                            execution_time_seconds=r.execution_time_seconds,
-                            output_json={"content": r.content[:5000]},
-                        ))
+                now_utc = datetime.now(timezone.utc)
+                for item in task_records:
+                    r = item["result"]
+                    td = item["task_data"]
+                    failed = not r.success
+                    error_msg = (r.error or "").strip() or ("quality gate rejected" if failed else "")
+                    with session_scope() as db_session:
+                        try:
+                            db_session.add(TaskModel(
+                                directive_id=directive_id,
+                                lieutenant_id=item["lt_id"],
+                                title=td.get("title", "")[:256],
+                                description=td.get("description", "")[:5000],
+                                status="failed" if failed else "completed",
+                                wave_number=wave_num,
+                                cost_usd=r.cost_usd,
+                                quality_score=r.quality_score,
+                                model_used=r.model_used,
+                                tokens_input=r.tokens_input,
+                                tokens_output=r.tokens_output,
+                                execution_time_seconds=r.execution_time_seconds,
+                                output_json={"content": (r.content or "")[:5000]},
+                                last_error=error_msg or None,
+                                error_log_json=(
+                                    [{
+                                        "attempt": 1,
+                                        "error": error_msg,
+                                        "model": r.model_used,
+                                        "timestamp": now_utc.isoformat(),
+                                    }] if failed else None
+                                ),
+                                completed_at=now_utc,
+                            ))
+                        except Exception as row_err:
+                            logger.error("Failed to persist task row (title=%r): %s",
+                                         td.get("title", "")[:60], row_err)
             except Exception as e:
-                logger.warning("Failed to batch-record tasks: %s", e)
+                logger.error("Failed to batch-record tasks: %s", e)
 
             wave_results.append({
                 "wave_number": wave_num,

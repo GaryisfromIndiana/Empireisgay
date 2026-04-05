@@ -434,12 +434,17 @@ class KnowledgeRepository(BaseRepository[KnowledgeEntity]):
         Returns:
             List of {entity, similarity} dicts.
         """
+        # embedding_json is deferred at the ORM level; undefer for this query.
+        # Cap at 2000 to prevent full-table loads with 25KB-per-row vectors.
+        from sqlalchemy.orm import undefer
         stmt = (
             select(KnowledgeEntity)
+            .options(undefer(KnowledgeEntity.embedding_json))
             .where(and_(
                 KnowledgeEntity.empire_id == empire_id,
                 KnowledgeEntity.embedding_json.is_not(None),
             ))
+            .limit(2000)
         )
         entities = list(self.session.execute(stmt).scalars().all())
 

@@ -289,14 +289,25 @@ class SchedulerDaemon:
         # Try to restore job state from DB (survives process restarts)
         synced = self._sync_from_db()
 
-        if synced == 0:
-            # Fresh start — stagger jobs so they don't all fire on first tick
-            now = datetime.now(timezone.utc)
-            immediate_jobs = {"health_check", "budget_check", "directive_check"}
-            with self._lock:
-                for job in self._jobs.values():
-                    if job.name not in immediate_jobs:
-                        job.last_run = now  # Will wait full interval before first run
+        # Stagger expensive jobs on startup regardless of whether this is a
+        # fresh start or a restore.  If the previous worker was OOM-killed
+        # mid-tick, its last_run never persisted, so _sync_from_db will show
+        # many jobs as "overdue" and they'll all fire on tick 0 — which is
+        # exactly how you get an OOM death spiral across every restart.
+        # Push high-priority (expensive) jobs forward by their interval so
+        # the new worker warms up before touching them.
+        now = datetime.now(timezone.utc)
+        immediate_jobs = {"health_check", "budget_check", "directive_check"}
+        with self._lock:
+            for job in self._jobs.values():
+                if job.name in immediate_jobs:
+                    continue
+                # If last_run is stale (>interval ago) OR None, defer it to
+                # now so tick 0 doesn't fire every overdue job simultaneously.
+                if job.last_run is None:
+                    job.last_run = now
+                elif (now - job.last_run).total_seconds() >= job.interval_seconds:
+                    job.last_run = now
 
         # Persist job registry IMMEDIATELY, before any tick runs.  Previously
         # sync only fired after a successful tick, so if the process died
@@ -662,10 +673,16 @@ class SchedulerDaemon:
         try:
             from core.search.sweep import IntelligenceSweep
             sweep = IntelligenceSweep(self.empire_id)
-            results = sweep.run_sweep()
-            return {"discoveries": len(results) if isinstance(results, list) else 0}
+            result = sweep.run_full_sweep()
+            return {
+                "total_found": result.total_found,
+                "novel_items": result.novel_items,
+                "stored_memories": result.stored_memories,
+                "stored_entities": result.stored_entities,
+                "errors": result.errors[:3],
+            }
         except Exception as e:
-            logger.warning("Intelligence sweep failed: %s", e)
+            logger.error("Intelligence sweep failed: %s", e)
             return {"error": str(e)}
 
     def _run_quality_scoring(self) -> dict:
@@ -684,10 +701,10 @@ class SchedulerDaemon:
         try:
             from core.knowledge.resolution import EntityResolver
             resolver = EntityResolver(self.empire_id)
-            merged = resolver.resolve_all()
+            merged = resolver.merge_duplicates()
             return {"merged": merged}
         except Exception as e:
-            logger.warning("Duplicate resolution failed: %s", e)
+            logger.error("Duplicate resolution failed: %s", e)
             return {"error": str(e)}
 
     def _run_memory_compression(self) -> dict:
@@ -695,10 +712,16 @@ class SchedulerDaemon:
         try:
             from core.memory.compression import MemoryCompressor
             compressor = MemoryCompressor(self.empire_id)
-            compressed = compressor.compress_old_memories()
-            return {"compressed": compressed}
+            result = compressor.run_compression()
+            return {
+                "clusters_found": result.clusters_found,
+                "clusters_compressed": result.clusters_compressed,
+                "memories_consumed": result.memories_consumed,
+                "compression_ratio": result.compression_ratio,
+                "cost_usd": result.cost_usd,
+            }
         except Exception as e:
-            logger.warning("Memory compression failed: %s", e)
+            logger.error("Memory compression failed: %s", e)
             return {"error": str(e)}
 
     def _run_autonomous_research(self) -> dict:
