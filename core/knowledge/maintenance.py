@@ -296,19 +296,26 @@ class KnowledgeMaintainer:
     def suggest_gaps(self, domain: str = "") -> list[KnowledgeGap]:
         """Identify knowledge gaps — areas that need more research.
 
+        Only counts externally-sourced entities (web_research or entities
+        linked to research tasks) when assessing coverage. Internal entities
+        from LLM synthesis, debates, and evolution stay in the graph for
+        context but don't drive new research priorities. Without this gate
+        the system researches topics it invented from its own output —
+        debates about debates.
+
         Args:
             domain: Optional domain to focus on.
 
         Returns:
             List of knowledge gaps.
         """
-        graph = self._get_graph()
-        stats = graph.get_stats()
+        # Count only externally-sourced entities for gap assessment
+        external_stats = self._get_external_entity_stats()
 
         gaps = []
 
-        # Check for entity types with few entries
-        type_counts = stats.entity_types
+        # Check for entity types with few EXTERNAL entries
+        type_counts = external_stats["type_counts"]
         if type_counts:
             avg_count = sum(type_counts.values()) / len(type_counts) if type_counts else 0
             for entity_type, count in type_counts.items():
@@ -322,7 +329,9 @@ class KnowledgeMaintainer:
                         ],
                     ))
 
-        # Check for poorly connected entities
+        # Check for poorly connected entities (central entities are fine
+        # to pull from the full graph — they're context, not gap drivers)
+        graph = self._get_graph()
         central = graph.get_central_entities(limit=5)
         if central:
             for node in central:
@@ -337,8 +346,8 @@ class KnowledgeMaintainer:
                         related_entities=[node.name],
                     ))
 
-        # General gaps if graph is small
-        if stats.entity_count < 10:
+        # General gaps if external graph is small
+        if external_stats["total"] < 10:
             gaps.append(KnowledgeGap(
                 topic="General domain knowledge",
                 importance=0.8,
@@ -349,6 +358,48 @@ class KnowledgeMaintainer:
             ))
 
         return gaps
+
+    def _get_external_entity_stats(self) -> dict:
+        """Count entities from external sources only.
+
+        External = source_type='web_research' OR has a source_task_id
+        (meaning it came from an actual research task that web-searched).
+        Everything else (LLM synthesis, debates, evolution) is internal
+        and excluded from gap assessment.
+        """
+        from db.engine import repo_scope
+        from db.repositories.knowledge import KnowledgeRepository
+        from sqlalchemy import select, func, or_
+        from db.models import KnowledgeEntity
+
+        with repo_scope(KnowledgeRepository) as repo:
+            external_filter = or_(
+                KnowledgeEntity.source_type == "web_research",
+                KnowledgeEntity.source_task_id.is_not(None),
+            )
+
+            # Total external count
+            total = repo.session.execute(
+                select(func.count(KnowledgeEntity.id)).where(
+                    KnowledgeEntity.empire_id == self.empire_id,
+                    external_filter,
+                )
+            ).scalar() or 0
+
+            # Type breakdown
+            rows = repo.session.execute(
+                select(
+                    KnowledgeEntity.entity_type,
+                    func.count(KnowledgeEntity.id),
+                ).where(
+                    KnowledgeEntity.empire_id == self.empire_id,
+                    external_filter,
+                ).group_by(KnowledgeEntity.entity_type)
+            ).all()
+
+            type_counts = {row[0]: row[1] for row in rows}
+
+            return {"total": total, "type_counts": type_counts}
 
     def compact_graph(self) -> dict:
         """Remove orphaned nodes and edges, optimize storage.

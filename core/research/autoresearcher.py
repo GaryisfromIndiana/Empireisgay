@@ -669,6 +669,7 @@ Rules:
                     confidence=entity.get("confidence", 0.6),
                     tags=entity.get("tags", []) + ["auto_research", q.domain],
                     source_task_id=source_task_id or "",
+                    source_type="web_research",
                 )
                 stored += 1
             except Exception as exc:

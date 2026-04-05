@@ -100,6 +100,7 @@ class KnowledgeGraph:
         attributes: dict | None = None,
         confidence: float = 0.8,
         source_task_id: str = "",
+        source_type: str = "extraction",
         tags: list[str] | None = None,
         valid_from: str | None = None,
         valid_to: str | None = None,
@@ -113,6 +114,8 @@ class KnowledgeGraph:
             attributes: Additional attributes.
             confidence: Confidence score.
             source_task_id: Source task.
+            source_type: Origin — 'web_research' for external, 'extraction' default,
+                         'synthesis' for LLM-only, 'debate' for war rooms.
             tags: Tags for search.
             valid_from: When this entity became relevant (ISO datetime).
             valid_to: When this entity stopped being relevant.
@@ -145,6 +148,7 @@ class KnowledgeGraph:
                     attributes_json=enriched_attrs,
                     confidence=confidence,
                     source_task_id=source_task_id or None,
+                    source_type=source_type,
                     tags_json=tags or [],
                 )
                 repo.commit()
