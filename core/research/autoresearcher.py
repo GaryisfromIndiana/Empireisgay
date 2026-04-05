@@ -198,9 +198,9 @@ class AutoResearcher:
 
             # Step 4: Synthesize findings into per-domain research reports
             if result.novel_findings > 0:
-                reports = self._synthesize(result)
+                reports, synthesis_cost = self._synthesize(result)
                 result.synthesis_reports = reports
-                result.total_cost_usd += reports * 0.005
+                result.total_cost_usd += synthesis_cost
 
             # Step 5: Update strategy tracker
             self._update_strategies(result)
@@ -263,6 +263,9 @@ class AutoResearcher:
         Creates a Task row linked to the assigned lieutenant, so autonomous
         research shows up in the task/cost tracking system instead of running
         as a ghost pipeline.
+
+        Task lifecycle is guaranteed: the finally block ensures every task
+        row ends in 'completed' or 'failed', never stuck in 'executing'.
         """
         from core.research.questions import ResearchQuestion
 
@@ -278,6 +281,7 @@ class AutoResearcher:
 
         # Create Task row so this research is visible in the task system
         task_id = self._create_task(q)
+        task_finalized = False
 
         try:
             # A. Search
@@ -293,7 +297,7 @@ class AutoResearcher:
             novel = self._novelty_filter(findings)
             step.novel_findings = len(novel)
 
-            # D. Extract entities from novel findings (tracks cost via extraction_cost)
+            # D. Extract entities from novel findings
             entities, extraction_cost, extraction_tokens, model_used = self._extract_entities(novel, q.domain)
             step.entities_extracted = len(entities)
             step.cost_usd += extraction_cost
@@ -306,6 +310,7 @@ class AutoResearcher:
             step.success = True
 
             # Mark task complete and update lieutenant + empire stats
+            step.duration_seconds = time.time() - start
             self._complete_task(
                 task_id=task_id,
                 step=step,
@@ -313,11 +318,19 @@ class AutoResearcher:
                 tokens=extraction_tokens,
                 model_used=model_used,
             )
+            task_finalized = True
 
         except Exception as exc:
             step.error = str(exc)
             logger.error("Research step failed for '%s': %s", q.question[:60], exc)
             self._fail_task(task_id, str(exc))
+            task_finalized = True
+
+        finally:
+            # Catch-all: if neither complete nor fail ran (e.g., _complete_task
+            # itself threw), fail the task so it never stays stuck in 'executing'.
+            if not task_finalized:
+                self._fail_task(task_id, f"Task finalization failed after {time.time() - start:.1f}s")
 
         step.duration_seconds = time.time() - start
         return step
@@ -681,8 +694,11 @@ Rules:
     # Step 4: Synthesis
     # ------------------------------------------------------------------
 
-    def _synthesize(self, result: ResearchCycleResult) -> int:
-        """Produce per-domain synthesis reports from research findings."""
+    def _synthesize(self, result: ResearchCycleResult) -> tuple[int, float]:
+        """Produce per-domain synthesis reports from research findings.
+
+        Returns (reports_created, total_cost_usd).
+        """
         from llm.router import ModelRouter, TaskMetadata
         from llm.base import LLMRequest, LLMMessage
         from core.memory.manager import MemoryManager
@@ -690,6 +706,7 @@ Rules:
         router = ModelRouter(self.empire_id)
         mm = MemoryManager(self.empire_id)
         reports_created = 0
+        total_cost = 0.0
 
         domain_findings: dict[str, list[ResearchFinding]] = {}
         for step in result.step_results:
@@ -738,6 +755,7 @@ Write in a professional intelligence-briefing style. Be specific — cite source
 
             try:
                 response = router.execute(request, metadata)
+                total_cost += float(response.cost_usd or 0.0)
 
                 mm.store(
                     content=response.content,
@@ -749,12 +767,12 @@ Write in a professional intelligence-briefing style. Be specific — cite source
                     source_type="autonomous",
                 )
                 reports_created += 1
-                logger.info("Created synthesis report for domain '%s'", domain)
+                logger.info("Created synthesis report for domain '%s' ($%.4f)", domain, response.cost_usd or 0)
 
             except Exception as exc:
-                logger.warning("Synthesis failed for domain '%s': %s", domain, exc)
+                logger.error("Synthesis failed for domain '%s': %s", domain, exc)
 
-        return reports_created
+        return reports_created, total_cost
 
     # ------------------------------------------------------------------
     # Step 5: Strategy learning

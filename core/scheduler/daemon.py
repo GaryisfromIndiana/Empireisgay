@@ -117,6 +117,7 @@ class SchedulerDaemon:
             ("health_check",         s.health_check_interval_minutes * 60, 1, "System health checks"),
             ("budget_check",         900,                                  2, "Budget limit checking"),
             ("directive_check",      300,                                  3, "Check for pending directives"),
+            ("stale_task_cleanup",   900,                                  2, "Fail tasks stuck in executing > 30 min"),
             ("memory_decay",         3600,                                 3, "Apply memory decay"),
             ("cleanup",              86400,                                3, "Retention policy enforcement"),
             ("embedding_backfill",   3600,                                 4, "Backfill embeddings for vector search"),
@@ -613,6 +614,45 @@ class SchedulerDaemon:
             }
 
     # ── Job handlers ───────────────────────────────────────────────────
+
+    def _run_stale_task_cleanup(self) -> dict:
+        """Fail tasks stuck in 'executing' for > 30 minutes.
+
+        Prevents ghost rows from accumulating when a worker dies mid-research
+        or _complete_task throws. The TaskRepository.cleanup_stale method
+        already exists — this just wires it into the scheduler.
+        """
+        from db.engine import repo_scope
+        from db.repositories.task import TaskRepository
+
+        with repo_scope(TaskRepository) as repo:
+            # cleanup_stale marks 'executing' tasks older than N hours as failed.
+            # We use a tighter window (0.5h) than the default (24h) because
+            # research tasks should complete in minutes, not hours.
+            from datetime import timedelta
+            from sqlalchemy import and_, update
+            from db.models import Task
+
+            threshold = datetime.now(timezone.utc) - timedelta(minutes=30)
+            stmt = (
+                update(Task)
+                .where(and_(
+                    Task.status == "executing",
+                    Task.started_at < threshold,
+                ))
+                .values(
+                    status="failed",
+                    last_error="Stuck in executing > 30 min — auto-cleaned by scheduler",
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+            result = repo.session.execute(stmt)
+            cleaned = result.rowcount
+            repo.commit()
+
+        if cleaned > 0:
+            logger.warning("Stale task cleanup: failed %d stuck tasks", cleaned)
+        return {"cleaned": cleaned}
 
     def _run_health_check(self) -> dict:
         """Run system health checks."""
