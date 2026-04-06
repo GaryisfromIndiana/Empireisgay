@@ -296,21 +296,19 @@ class KnowledgeMaintainer:
     def suggest_gaps(self, domain: str = "") -> list[KnowledgeGap]:
         """Identify knowledge gaps — areas that need more research.
 
-        Only counts externally-sourced entities (web_research or entities
-        linked to research tasks) when assessing coverage. Internal entities
-        from LLM synthesis, debates, and evolution stay in the graph for
-        context but don't drive new research priorities. Without this gate
-        the system researches topics it invented from its own output —
-        debates about debates.
+        Only counts externally-sourced entities when assessing coverage.
+        Deprioritizes topics/domains that have been researched recently
+        so the system explores new ground instead of hammering the same
+        areas every cycle.
 
         Args:
             domain: Optional domain to focus on.
 
         Returns:
-            List of knowledge gaps.
+            List of knowledge gaps, sorted by adjusted importance.
         """
-        # Count only externally-sourced entities for gap assessment
         external_stats = self._get_external_entity_stats()
+        recent_research = self._get_recent_research_activity(domain)
 
         gaps = []
 
@@ -320,31 +318,34 @@ class KnowledgeMaintainer:
             avg_count = sum(type_counts.values()) / len(type_counts) if type_counts else 0
             for entity_type, count in type_counts.items():
                 if count < avg_count * 0.3:
-                    gaps.append(KnowledgeGap(
-                        topic=f"{entity_type} entities",
-                        importance=0.6,
-                        suggested_queries=[
-                            f"Research key {entity_type}s in {domain or 'this domain'}",
-                            f"Identify important {entity_type}s we're missing",
-                        ],
-                    ))
+                    importance = self._deprioritize(0.6, entity_type, recent_research)
+                    if importance > 0.1:
+                        gaps.append(KnowledgeGap(
+                            topic=f"{entity_type} entities",
+                            importance=importance,
+                            suggested_queries=[
+                                f"Research key {entity_type}s in {domain or 'this domain'}",
+                                f"Identify important {entity_type}s we're missing",
+                            ],
+                        ))
 
-        # Check for poorly connected entities (central entities are fine
-        # to pull from the full graph — they're context, not gap drivers)
+        # Check for poorly connected entities
         graph = self._get_graph()
         central = graph.get_central_entities(limit=5)
         if central:
             for node in central:
                 if node.confidence < 0.5:
-                    gaps.append(KnowledgeGap(
-                        topic=f"Low confidence on key entity: {node.name}",
-                        importance=0.7,
-                        suggested_queries=[
-                            f"Research {node.name} in depth",
-                            f"Verify information about {node.name}",
-                        ],
-                        related_entities=[node.name],
-                    ))
+                    importance = self._deprioritize(0.7, node.name, recent_research)
+                    if importance > 0.1:
+                        gaps.append(KnowledgeGap(
+                            topic=f"Low confidence on key entity: {node.name}",
+                            importance=importance,
+                            suggested_queries=[
+                                f"Research {node.name} in depth",
+                                f"Verify information about {node.name}",
+                            ],
+                            related_entities=[node.name],
+                        ))
 
         # General gaps if external graph is small
         if external_stats["total"] < 10:
@@ -357,7 +358,67 @@ class KnowledgeMaintainer:
                 ],
             ))
 
+        # Sort by importance so the most novel gaps get researched first
+        gaps.sort(key=lambda g: g.importance, reverse=True)
         return gaps
+
+    def _get_recent_research_activity(self, domain: str = "") -> dict[str, int]:
+        """Count recent research tasks per topic/domain in the last 24h.
+
+        Returns {topic_lower: task_count} so suggest_gaps can deprioritize
+        topics that have already been researched recently.
+        """
+        from db.engine import repo_scope
+        from db.repositories.task import TaskRepository
+        from sqlalchemy import select, func, and_
+        from db.models import Task
+        from datetime import timedelta
+
+        activity: dict[str, int] = {}
+        try:
+            with repo_scope(TaskRepository) as repo:
+                since = datetime.now(timezone.utc) - timedelta(hours=24)
+                rows = repo.session.execute(
+                    select(Task.title, func.count(Task.id))
+                    .where(and_(
+                        Task.task_type == "research",
+                        Task.created_at > since,
+                    ))
+                    .group_by(Task.title)
+                ).all()
+
+                for title, count in rows:
+                    # Extract keywords from research task titles for matching
+                    # Title format: "Research: <question text>"
+                    clean = (title or "").lower().replace("research:", "").strip()
+                    for word in clean.split():
+                        if len(word) > 3:
+                            activity[word] = activity.get(word, 0) + count
+        except Exception as e:
+            logger.debug("Recent research activity check failed: %s", e)
+
+        return activity
+
+    def _deprioritize(
+        self, base_importance: float, topic: str, recent: dict[str, int]
+    ) -> float:
+        """Reduce importance for topics that overlap with recent research.
+
+        Each recent task that mentions this topic reduces importance by 0.15,
+        down to a floor of 0.1. This means a topic researched 4+ times in
+        the last 24h drops to near-zero priority, pushing the system toward
+        unexplored territory.
+        """
+        topic_lower = topic.lower()
+        overlap = sum(
+            count for word, count in recent.items()
+            if word in topic_lower or topic_lower in word
+        )
+        if overlap == 0:
+            return base_importance
+        penalty = min(overlap * 0.15, base_importance - 0.1)
+        adjusted = base_importance - penalty
+        return max(0.1, adjusted)
 
     def _get_external_entity_stats(self) -> dict:
         """Count entities from external sources only.
