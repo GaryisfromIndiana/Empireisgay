@@ -35,7 +35,11 @@
       "Bash(sed -i '' 's/request\\\\.args\\\\.get\\(\"\"depth\"\", \\\\\\([0-9]*\\\\\\)\\)/request.args.get\\(\"\"depth\"\", \\\\1, type=int\\)/g' web/routes/api.py)",
       "Bash(sed -i '' 's/request\\\\.args\\\\.get\\(\"\"days\"\", \\\\\\([0-9]*\\\\\\)\\)/request.args.get\\(\"\"days\"\", \\\\1, type=int\\)/g' web/routes/api.py)",
       "Bash(python3 -c \":*)",
-      "Skill(update-config)"
+      "Skill(update-config)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(grep -i \"semantic\\\\|experiential\\\\|design\\\\|episodic\" /Users/asd/Downloads/Empireisgay-main/core/memory/*.py)",
+      "Bash(find /Users/asd/Downloads/Empireisgay-main/core -name \"*.py\" -type f -exec wc -l {} \\\\;)",
+      "Bash(railway logs:*)"
     ]
   }
 }
