@@ -186,12 +186,13 @@ class HealthChecker:
     def check_lieutenant_health(self) -> HealthCheckResult:
         """Check lieutenant fleet health."""
         try:
-            from db.engine import get_session
+            from db.engine import session_scope
             from db.repositories.lieutenant import LieutenantRepository
-            session = get_session()
-            repo = LieutenantRepository(session)
 
-            summary = repo.get_fleet_summary(self.empire_id)
+            with session_scope() as session:
+                repo = LieutenantRepository(session)
+                summary = repo.get_fleet_summary(self.empire_id)
+
             total = summary.get("total_lieutenants", 0)
             active = summary.get("by_status", {}).get("active", 0)
             avg_perf = summary.get("avg_performance", 0)

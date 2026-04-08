@@ -198,13 +198,11 @@ class SchedulerDaemon:
     def _sync_to_db(self) -> None:
         """Persist current job state to the scheduler_jobs table.
 
-        Per-row commits so one worker losing a race (UniqueConstraint on
-        empire_id + job_type) doesn't roll back every other job in the batch.
-        Previously a single conflict in a multi-worker setup killed the
-        entire sync and nothing landed — which is exactly how scheduler_jobs
-        stayed at 0 rows in production.
+        Uses a single session for all jobs to avoid pool exhaustion.
+        Per-row savepoints so one IntegrityError (race with another worker)
+        doesn't roll back the entire batch.
         """
-        from db.engine import get_session
+        from db.engine import session_scope
         from db.models import SchedulerJob
         from sqlalchemy import select
         from sqlalchemy.exc import IntegrityError
@@ -213,61 +211,62 @@ class SchedulerDaemon:
             snapshot = list(self._jobs.values())
 
         persisted = 0
-        for job in snapshot:
-            session = get_session()
-            try:
-                existing = session.execute(
-                    select(SchedulerJob).where(
-                        SchedulerJob.empire_id == self.empire_id,
-                        SchedulerJob.job_type == job.job_type,
-                    )
-                ).scalar_one_or_none()
+        try:
+            with session_scope() as session:
+                for job in snapshot:
+                    try:
+                        savepoint = session.begin_nested()
+                        existing = session.execute(
+                            select(SchedulerJob).where(
+                                SchedulerJob.empire_id == self.empire_id,
+                                SchedulerJob.job_type == job.job_type,
+                            )
+                        ).scalar_one_or_none()
 
-                next_run = None
-                if job.last_run:
-                    next_run = job.last_run + timedelta(seconds=job.interval_seconds)
+                        next_run = None
+                        if job.last_run:
+                            next_run = job.last_run + timedelta(seconds=job.interval_seconds)
 
-                if existing:
-                    existing.last_run_at = job.last_run
-                    existing.next_run_at = next_run
-                    existing.run_count = job.run_count
-                    existing.success_count = job.run_count - job.error_count
-                    existing.error_count = job.error_count
-                    existing.consecutive_errors = job.consecutive_errors
-                    existing.last_error = job.last_error or None
-                    existing.avg_duration_ms = job.avg_duration_ms or None
-                    existing.enabled = job.enabled
-                    existing.status = "active" if job.enabled else "disabled"
-                else:
-                    session.add(SchedulerJob(
-                        empire_id=self.empire_id,
-                        job_type=job.job_type,
-                        name=job.name,
-                        description=job.description,
-                        status="active" if job.enabled else "disabled",
-                        enabled=job.enabled,
-                        interval_seconds=job.interval_seconds,
-                        priority=job.priority,
-                        last_run_at=job.last_run,
-                        next_run_at=next_run,
-                        run_count=job.run_count,
-                        success_count=job.run_count - job.error_count,
-                        error_count=job.error_count,
-                        consecutive_errors=job.consecutive_errors,
-                        last_error=job.last_error or None,
-                        avg_duration_ms=job.avg_duration_ms or None,
-                    ))
+                        if existing:
+                            existing.last_run_at = job.last_run
+                            existing.next_run_at = next_run
+                            existing.run_count = job.run_count
+                            existing.success_count = job.run_count - job.error_count
+                            existing.error_count = job.error_count
+                            existing.consecutive_errors = job.consecutive_errors
+                            existing.last_error = job.last_error or None
+                            existing.avg_duration_ms = job.avg_duration_ms or None
+                            existing.enabled = job.enabled
+                            existing.status = "active" if job.enabled else "disabled"
+                        else:
+                            session.add(SchedulerJob(
+                                empire_id=self.empire_id,
+                                job_type=job.job_type,
+                                name=job.name,
+                                description=job.description,
+                                status="active" if job.enabled else "disabled",
+                                enabled=job.enabled,
+                                interval_seconds=job.interval_seconds,
+                                priority=job.priority,
+                                last_run_at=job.last_run,
+                                next_run_at=next_run,
+                                run_count=job.run_count,
+                                success_count=job.run_count - job.error_count,
+                                error_count=job.error_count,
+                                consecutive_errors=job.consecutive_errors,
+                                last_error=job.last_error or None,
+                                avg_duration_ms=job.avg_duration_ms or None,
+                            ))
 
-                session.commit()
-                persisted += 1
-            except IntegrityError:
-                # Another worker beat us to this row — not an error, just a race
-                session.rollback()
-            except Exception as e:
-                session.rollback()
-                logger.error("Failed to persist scheduler job %s: %s", job.job_type, e)
-            finally:
-                session.close()
+                        savepoint.commit()
+                        persisted += 1
+                    except IntegrityError:
+                        savepoint.rollback()
+                    except Exception as e:
+                        savepoint.rollback()
+                        logger.error("Failed to persist scheduler job %s: %s", job.job_type, e)
+        except Exception as e:
+            logger.error("Failed to sync scheduler jobs to DB: %s", e)
 
         if persisted:
             logger.debug("Persisted %d/%d scheduler jobs", persisted, len(snapshot))
