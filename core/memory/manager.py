@@ -539,9 +539,16 @@ class MemoryManager:
         memory_types: list[str] | None = None,
         lieutenant_id: str = "",
         limit: int = 20,
+        refresh_on_access: bool = True,
     ) -> list[dict]:
         """Search memories by content."""
-        return self.recall(query=query, memory_types=memory_types, lieutenant_id=lieutenant_id, limit=limit)
+        return self.recall(
+            query=query,
+            memory_types=memory_types,
+            lieutenant_id=lieutenant_id,
+            limit=limit,
+            refresh_on_access=refresh_on_access,
+        )
 
     def store_task_outcome(
         self,

@@ -18,7 +18,7 @@ def memory_overview():
         from core.memory.manager import MemoryManager
         mm = MemoryManager(empire_id)
         stats = mm.get_stats()
-        recent = mm.recall(limit=10)
+        recent = mm.recall(limit=10, refresh_on_access=False)
         return render_template("memory/overview.html", stats=stats.__dict__, recent=recent)
     except Exception as e:
         return render_template("memory/overview.html", stats={}, recent=[], error=str(e))
@@ -33,7 +33,12 @@ def memory_search():
     try:
         from core.memory.manager import MemoryManager
         mm = MemoryManager(empire_id)
-        results = mm.search(query=query, memory_types=memory_types or None, limit=30)
+        results = mm.search(
+            query=query,
+            memory_types=memory_types or None,
+            limit=30,
+            refresh_on_access=False,
+        )
         return render_template("memory/search.html", query=query, results=results, types=memory_types)
     except Exception as e:
         return render_template("memory/search.html", query=query, results=[], error=str(e))
@@ -46,7 +51,7 @@ def memories_by_type(memory_type: str):
     try:
         from core.memory.manager import MemoryManager
         mm = MemoryManager(empire_id)
-        memories = mm.recall(memory_types=[memory_type], limit=50)
+        memories = mm.recall(memory_types=[memory_type], limit=50, refresh_on_access=False)
         return jsonify(memories)
     except Exception as e:
         logger.error("API error: %s", e)
@@ -60,7 +65,7 @@ def memories_by_lieutenant(lieutenant_id: str):
     try:
         from core.memory.manager import MemoryManager
         mm = MemoryManager(empire_id)
-        memories = mm.recall(lieutenant_id=lieutenant_id, limit=50)
+        memories = mm.recall(lieutenant_id=lieutenant_id, limit=50, refresh_on_access=False)
         return jsonify(memories)
     except Exception as e:
         logger.error("API error: %s", e)
