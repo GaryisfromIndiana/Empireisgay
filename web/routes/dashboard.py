@@ -76,6 +76,8 @@ def _fetch_dashboard_data(empire_id: str) -> dict:
         # hit _vector_search_fallback which loaded hundreds of embedded rows
         # per hit. That was the single biggest contributor to OOM kills.
         latest_research = []
+        latest_feeds = []
+        recent_discoveries = []
         try:
             from db.models import MemoryEntry
             stmt = (
@@ -98,6 +100,50 @@ def _fetch_dashboard_data(empire_id: str) -> dict:
                     "created_at": m.created_at.isoformat() if m.created_at else None,
                 }
                 for m in rows
+            ]
+
+            # Keep dashboard render local/read-only.
+            # Feed and discovery panels should reflect stored state instead of
+            # triggering live fetches during page load or polling.
+            feed_rows = session.execute(
+                select(MemoryEntry)
+                .where(and_(
+                    MemoryEntry.empire_id == empire_id,
+                    MemoryEntry.memory_type == "semantic",
+                    MemoryEntry.title.like("Feed:%"),
+                ))
+                .order_by(MemoryEntry.created_at.desc())
+                .limit(5)
+            ).scalars().all()
+            latest_feeds = [
+                {
+                    "title": (m.title or "Feed entry").removeprefix("Feed: ").strip(),
+                    "url": (m.metadata_json or {}).get("url", ""),
+                    "summary": (m.content or "")[:300],
+                    "source": (m.metadata_json or {}).get("source_feed", "stored"),
+                }
+                for m in feed_rows
+            ]
+
+            discovery_rows = session.execute(
+                select(MemoryEntry)
+                .where(and_(
+                    MemoryEntry.empire_id == empire_id,
+                    MemoryEntry.memory_type == "semantic",
+                    MemoryEntry.title.like("Discovery:%"),
+                ))
+                .order_by(MemoryEntry.created_at.desc())
+                .limit(5)
+            ).scalars().all()
+            recent_discoveries = [
+                {
+                    "id": m.id,
+                    "title": m.title,
+                    "content": (m.content or "")[:500],
+                    "category": m.category,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in discovery_rows
             ]
         except Exception as e:
             logger.debug("Dashboard memory fetch failed: %s", e)
@@ -170,6 +216,8 @@ def _fetch_dashboard_data(empire_id: str) -> dict:
         "recent_completed": recent_completed,
         "budget": budget_data,
         "latest_research": latest_research,
+        "latest_feeds": latest_feeds,
+        "recent_discoveries": recent_discoveries,
         "knowledge_highlights": knowledge_highlights,
         "infra": infra_stats,
     }
@@ -181,26 +229,6 @@ def index():
     empire_id = current_app.config.get("EMPIRE_ID", "")
     try:
         data = _fetch_dashboard_data(empire_id)
-
-        # Extra data only needed for the HTML template
-        try:
-            from core.search.feeds import FeedReader
-            reader = FeedReader(empire_id)
-            entries = reader.fetch_latest(max_total=5, max_per_feed=2)
-            data["latest_feeds"] = [
-                {"title": e.title, "url": e.url, "summary": e.summary, "source": e.source_feed}
-                for e in entries
-            ]
-        except Exception:
-            data["latest_feeds"] = []
-
-        try:
-            from core.search.sweep import IntelligenceSweep
-            sweep = IntelligenceSweep(empire_id)
-            data["recent_discoveries"] = sweep.get_recent_discoveries(limit=5)
-        except Exception:
-            data["recent_discoveries"] = []
-
         return render_template("dashboard.html", **data)
 
     except Exception as e:

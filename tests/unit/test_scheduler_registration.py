@@ -6,9 +6,9 @@ from core.scheduler.daemon import JobConfig, SchedulerDaemon
 
 
 def test_all_default_jobs_registered():
-    """Scheduler should register exactly 15 default jobs (6 cut for lacking measurable output)."""
+    """Scheduler should register exactly 16 default jobs."""
     daemon = SchedulerDaemon("test-empire")
-    assert len(daemon._jobs) == 15
+    assert len(daemon._jobs) == 16
 
 
 def test_every_job_has_a_handler():

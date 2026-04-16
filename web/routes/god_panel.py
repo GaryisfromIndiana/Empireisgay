@@ -26,6 +26,39 @@ _command_lock = threading.Lock()
 _MAX_CACHED = 200
 
 
+def _deterministic_command_plan(command: str) -> dict | None:
+    """Return a local fallback plan for obvious command intents."""
+    lowered = command.lower()
+
+    if any(token in lowered for token in ("health", "status", "system check", "check system")):
+        action = "STATUS"
+    elif any(token in lowered for token in ("sweep", "scan sources", "discoveries", "intelligence")):
+        action = "SWEEP"
+    elif any(token in lowered for token in ("evolve", "evolution", "improvement cycle")):
+        action = "EVOLVE"
+    elif any(token in lowered for token in ("war room", "debate", "argue", "competing views")):
+        action = "WARROOM"
+    elif any(token in lowered for token in ("audit", "quality issues", "contaminated entities")):
+        action = "AUDIT"
+    elif any(token in lowered for token in ("pipeline", "search scrape extract synthesize")):
+        action = "PIPELINE"
+    elif any(token in lowered for token in ("autoresearch", "auto research", "knowledge gaps", "find gaps")):
+        action = "AUTORESEARCH"
+    elif "directive" in lowered:
+        action = "DIRECTIVE"
+    else:
+        return None
+
+    return {
+        "action": action,
+        "topic": command,
+        "description": command,
+        "lieutenants": [],
+        "priority": 5,
+        "build_on_existing": False,
+    }
+
+
 def _track_command(command_id: str, command: str, action: str, topic: str) -> dict:
     """Register a new command — persisted to its own table, cached in memory."""
     entry = {
@@ -225,11 +258,8 @@ def execute_command():
         return jsonify({"error": "No command or topic provided"}), 400
 
     try:
-        from llm.base import LLMMessage, LLMRequest
-        from llm.router import ModelRouter, TaskMetadata
-        router = ModelRouter(empire_id)
-
         total_cost = 0.0
+        plan = _deterministic_command_plan(command)
 
         # ── Step 1: Check what Empire already knows ─────────────────────
         prior_knowledge = ""
@@ -270,53 +300,75 @@ def execute_command():
             entity_lines = [f"- {e['name']} ({e['type']}): {e['description']}" for e in related_entities[:5]]
             context_block += "\n\n## Related Knowledge Graph Entities\n" + "\n".join(entity_lines)
 
-        classify_prompt = (
-            "You are the God Panel — the brain of an autonomous AI research system called Empire.\n"
-            "Empire has 6 lieutenant specialists:\n"
-            "  - Model Intelligence (models): LLM releases, benchmarks, pricing, capabilities\n"
-            "  - Research Scout (research): Papers, training techniques, alignment, scaling\n"
-            "  - Agent Systems (agents): Multi-agent, tool use, frameworks, MCP\n"
-            "  - Tooling & Infra (tooling): APIs, inference, vector DBs, deployment\n"
-            "  - Industry & Strategy (industry): Company strategy, funding, enterprise\n"
-            "  - Open Source (open_source): Open weight models, HuggingFace, local inference\n\n"
-            "Available actions:\n"
-            "- RESEARCH: Deep research on a topic — searches web, consults lieutenants, compounds knowledge\n"
-            "- DIRECTIVE: Create a multi-lieutenant directive for complex multi-step work\n"
-            "- WARROOM: Multi-lieutenant debate where specialists argue from their domain\n"
-            "- SWEEP: Intelligence sweep — scan all sources for new discoveries\n"
-            "- EVOLVE: Trigger a self-improvement evolution cycle\n"
-            "- AUDIT: Deep audit of the knowledge graph for quality issues\n"
-            "- STATUS: Report full system status and health\n"
-            "- CONTENT: Generate a polished report on a topic\n"
-            "- PIPELINE: Full 5-stage research pipeline (search→scrape→extract→deepen→synthesize)\n"
-            "- AUTORESEARCH: Empire finds its own knowledge gaps and autonomously researches to fill them\n\n"
-            "IMPORTANT: For research-oriented commands, prefer RESEARCH (engages lieutenants) "
-            "over PIPELINE (no lieutenants). Use PIPELINE only when the user specifically wants "
-            "raw data extraction. Use DIRECTIVE for complex multi-step tasks. Use WARROOM when "
-            "the user wants debate or competing perspectives.\n"
-            f"{context_block}\n\n"
-            f'User command: "{command}"\n\n'
-            "Respond with EXACTLY this JSON:\n"
-            '{"action": "ACTION_TYPE", "topic": "refined topic", '
-            '"description": "what to do and why", '
-            '"lieutenants": ["domain1", "domain2"], "priority": 1-10, '
-            '"build_on_existing": true/false}'
-        )
+        if plan is None:
+            try:
+                from llm.base import LLMMessage, LLMRequest
+                from llm.router import ModelRouter, TaskMetadata
 
-        response = router.execute(
-            LLMRequest(
-                messages=[LLMMessage.user(classify_prompt)],
-                max_tokens=400,
-                temperature=0.2,
-            ),
-            TaskMetadata(task_type="classification", complexity="simple"),
-        )
-        total_cost += response.cost_usd
+                router = ModelRouter(empire_id)
+                classify_prompt = (
+                    "You are the God Panel — the brain of an autonomous AI research system called Empire.\n"
+                    "Empire has 6 lieutenant specialists:\n"
+                    "  - Model Intelligence (models): LLM releases, benchmarks, pricing, capabilities\n"
+                    "  - Research Scout (research): Papers, training techniques, alignment, scaling\n"
+                    "  - Agent Systems (agents): Multi-agent, tool use, frameworks, MCP\n"
+                    "  - Tooling & Infra (tooling): APIs, inference, vector DBs, deployment\n"
+                    "  - Industry & Strategy (industry): Company strategy, funding, enterprise\n"
+                    "  - Open Source (open_source): Open weight models, HuggingFace, local inference\n\n"
+                    "Available actions:\n"
+                    "- RESEARCH: Deep research on a topic — searches web, consults lieutenants, compounds knowledge\n"
+                    "- DIRECTIVE: Create a multi-lieutenant directive for complex multi-step work\n"
+                    "- WARROOM: Multi-lieutenant debate where specialists argue from their domain\n"
+                    "- SWEEP: Intelligence sweep — scan all sources for new discoveries\n"
+                    "- EVOLVE: Trigger a self-improvement evolution cycle\n"
+                    "- AUDIT: Deep audit of the knowledge graph for quality issues\n"
+                    "- STATUS: Report full system status and health\n"
+                    "- CONTENT: Generate a polished report on a topic\n"
+                    "- PIPELINE: Full 5-stage research pipeline (search→scrape→extract→deepen→synthesize)\n"
+                    "- AUTORESEARCH: Empire finds its own knowledge gaps and autonomously researches to fill them\n\n"
+                    "IMPORTANT: For research-oriented commands, prefer RESEARCH (engages lieutenants) "
+                    "over PIPELINE (no lieutenants). Use PIPELINE only when the user specifically wants "
+                    "raw data extraction. Use DIRECTIVE for complex multi-step tasks. Use WARROOM when "
+                    "the user wants debate or competing perspectives.\n"
+                    f"{context_block}\n\n"
+                    f'User command: "{command}"\n\n'
+                    "Respond with EXACTLY this JSON:\n"
+                    '{"action": "ACTION_TYPE", "topic": "refined topic", '
+                    '"description": "what to do and why", '
+                    '"lieutenants": ["domain1", "domain2"], "priority": 1-10, '
+                    '"build_on_existing": true/false}'
+                )
 
-        # Parse classification
-        from llm.schemas import safe_json_loads
-        fallback = {"action": "RESEARCH", "topic": command, "description": command, "lieutenants": []}
-        plan = safe_json_loads(response.content, default=fallback)
+                response = router.execute(
+                    LLMRequest(
+                        messages=[LLMMessage.user(classify_prompt)],
+                        max_tokens=400,
+                        temperature=0.2,
+                    ),
+                    TaskMetadata(task_type="classification", complexity="simple"),
+                )
+                total_cost += response.cost_usd
+
+                from llm.schemas import safe_json_loads
+                fallback = {
+                    "action": "RESEARCH",
+                    "topic": command,
+                    "description": command,
+                    "lieutenants": [],
+                    "priority": 5,
+                    "build_on_existing": False,
+                }
+                plan = safe_json_loads(response.content, default=fallback)
+            except Exception as e:
+                logger.warning("God Panel classification failed, using local fallback: %s", e)
+                plan = {
+                    "action": "RESEARCH",
+                    "topic": command,
+                    "description": command,
+                    "lieutenants": [],
+                    "priority": 5,
+                    "build_on_existing": False,
+                }
 
         action = plan.get("action", "RESEARCH").upper()
         topic = plan.get("topic", command)
