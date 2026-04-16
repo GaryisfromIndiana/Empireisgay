@@ -96,3 +96,15 @@ def test_dashboard_does_not_refresh_memory_access_on_read(
 
     assert response.status_code == 200
     assert "Dashboard" in response.get_data(as_text=True)
+
+
+def test_dashboard_uses_canonical_trailing_slash_links(dashboard_app) -> None:
+    client = dashboard_app.test_client()
+    response = client.get("/")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'href="/memory/"' in body
+    assert 'href="/knowledge/"' in body
+    assert 'href="/god/"' in body
+    assert 'href="/warrooms/"' in body
