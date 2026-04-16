@@ -23,6 +23,7 @@ _session_factory: sessionmaker | None = None
 _scoped_session: scoped_session | None = None
 _lock = threading.Lock()
 _stats_lock = threading.Lock()
+_sqlite_write_lock = threading.RLock()
 _session_stats = {"opened_total": 0, "closed_total": 0, "active": 0}
 
 
@@ -51,9 +52,25 @@ class TrackedSession(Session):
         super().__init__(*args, **kwargs)
         self._close_recorded = False
         self._created_at = time.monotonic()
+        self._sqlite_write_lock_held = False
         _record_session_open()
 
+    def _is_sqlite_bound(self) -> bool:
+        bind = self.get_bind()
+        return bind is not None and str(bind.url).startswith("sqlite")
+
+    def _acquire_sqlite_write_lock(self) -> None:
+        if self._is_sqlite_bound() and not self._sqlite_write_lock_held:
+            _sqlite_write_lock.acquire()
+            self._sqlite_write_lock_held = True
+
+    def _release_sqlite_write_lock(self) -> None:
+        if self._sqlite_write_lock_held:
+            self._sqlite_write_lock_held = False
+            _sqlite_write_lock.release()
+
     def close(self) -> None:
+        self._release_sqlite_write_lock()
         if not self._close_recorded:
             _record_session_close()
             self._close_recorded = True
@@ -73,6 +90,27 @@ class TrackedSession(Session):
     def execute(self, *args, **kwargs):
         self._check_age()
         return super().execute(*args, **kwargs)
+
+    def flush(self, objects=None) -> None:
+        self._acquire_sqlite_write_lock()
+        try:
+            super().flush(objects=objects)
+        except Exception:
+            self._release_sqlite_write_lock()
+            raise
+
+    def commit(self) -> None:
+        self._acquire_sqlite_write_lock()
+        try:
+            super().commit()
+        finally:
+            self._release_sqlite_write_lock()
+
+    def rollback(self) -> None:
+        try:
+            super().rollback()
+        finally:
+            self._release_sqlite_write_lock()
 
     def __del__(self):
         """Last resort: close on garbage collection if still open."""
